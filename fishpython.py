@@ -160,7 +160,9 @@ class ChessGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("🏆 Entraîneur d'Échecs (SVG HD)")
-        self.master.geometry("1320x860")
+        self.default_geometry = "1320x860"
+        self.board_only_geometry = f"{self.CANVAS_SIZE + 180}x860"
+        self.master.geometry(self.default_geometry)
         self.theme_dark = True
         self.colors = self.get_colors(self.theme_dark)
         self.master.configure(bg=self.colors['bg'])
@@ -300,12 +302,12 @@ class ChessGUI:
         self.moves_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
         # Droite
-        right = tk.Frame(main, bg=self.colors['panel'], width=430)
-        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-        right.pack_propagate(False)
+        self.right_panel = tk.Frame(main, bg=self.colors['panel'], width=430)
+        self.right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        self.right_panel.pack_propagate(False)
 
         # Contrôles de Jeu (manuel)
-        controls = tk.LabelFrame(right, text="🎮 Contrôles de Jeu",
+        controls = tk.LabelFrame(self.right_panel, text="🎮 Contrôles de Jeu",
                                  fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
         controls.pack(fill=tk.X, padx=10, pady=10)
 
@@ -341,7 +343,7 @@ class ChessGUI:
         tk.Button(ur, text="↪️ Refaire (Redo)", command=self.redo_move).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
 
         # Horloge
-        clock = tk.LabelFrame(right, text="⏱️ Horloge", fg=self.colors['fg'],
+        clock = tk.LabelFrame(self.right_panel, text="⏱️ Horloge", fg=self.colors['fg'],
                               bg=self.colors['panel'], font=("Arial", 12, "bold"))
         clock.pack(fill=tk.X, padx=10, pady=10)
         self.clock_white_lbl = tk.Label(clock, text="Blancs: 05:00", fg=self.colors['fg'], bg=self.colors['panel'],
@@ -357,7 +359,7 @@ class ChessGUI:
         tk.Spinbox(r, from_=0, to=60, textvariable=self.increment_var, width=5).pack(side=tk.LEFT, padx=6)
 
         # Statistiques
-        stats = tk.LabelFrame(right, text="📊 Statistiques",
+        stats = tk.LabelFrame(self.right_panel, text="📊 Statistiques",
                               fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
         stats.pack(fill=tk.X, padx=10, pady=10)
         self.stats_text = tk.Text(stats, height=7, bg=self.colors['bg'], fg=self.colors['fg'],
@@ -365,7 +367,7 @@ class ChessGUI:
         self.stats_text.pack(fill=tk.X, padx=5, pady=5)
 
         # Analyse
-        an = tk.LabelFrame(right, text="🔍 Analyse",
+        an = tk.LabelFrame(self.right_panel, text="🔍 Analyse",
                            fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
         an.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.analysis_text = scrolledtext.ScrolledText(an, height=10, bg=self.colors['bg'], fg=self.colors['fg'],
@@ -378,7 +380,7 @@ class ChessGUI:
                   bg='#607D8B', fg='white', font=("Arial", 9, "bold")).pack(side=tk.RIGHT, padx=2)
 
         # ⚙️ Options moteur
-        opt = tk.LabelFrame(right, text="⚙️ Options moteur",
+        opt = tk.LabelFrame(self.right_panel, text="⚙️ Options moteur",
                             fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
         opt.pack(fill=tk.X, padx=10, pady=10)
         r1 = tk.Frame(opt, bg=self.colors['panel']); r1.pack(fill=tk.X, padx=6, pady=2)
@@ -401,8 +403,14 @@ class ChessGUI:
                        fg=self.colors['fg'], bg=self.colors['panel'], selectcolor=self.colors['panel']).pack(side=tk.LEFT)
         tk.Button(r3, text="📁 Choisir Stockfish", command=self.choose_stockfish).pack(side=tk.RIGHT)
 
+        r4 = tk.Frame(opt, bg=self.colors['panel']); r4.pack(fill=tk.X, padx=6, pady=2)
+        self.board_only_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(r4, text="Afficher seulement le plateau", variable=self.board_only_var,
+                       command=self.toggle_board_only, fg=self.colors['fg'], bg=self.colors['panel'],
+                       selectcolor=self.colors['panel']).pack(side=tk.LEFT)
+
         # 🤖 Mode Auto (SFSF) — panneau et boutons
-        auto = tk.LabelFrame(right, text="🤖 Mode Auto: Stockfish vs Stockfish",
+        auto = tk.LabelFrame(self.right_panel, text="🤖 Mode Auto: Stockfish vs Stockfish",
                              fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
         auto.pack(fill=tk.X, padx=10, pady=10)
 
@@ -1001,6 +1009,16 @@ Nuls: {s['draws']}"""
     def toggle_flip(self):
         self.flip_board = self.flip_var.get()
         self.update_board_display()
+
+    def toggle_board_only(self):
+        if self.board_only_var.get():
+            if self.right_panel.winfo_manager():
+                self.right_panel.pack_forget()
+            self.master.geometry(self.board_only_geometry)
+        else:
+            if not self.right_panel.winfo_manager():
+                self.right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+            self.master.geometry(self.default_geometry)
 
     def toggle_theme(self):
         self.theme_dark = not self.theme_dark
