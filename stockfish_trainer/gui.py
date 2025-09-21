@@ -30,6 +30,8 @@ class ChessGUI:
         self.theme_dark = True
         self.colors = self.get_colors(self.theme_dark)
         self.master.configure(bg=self.colors['bg'])
+        self.reduced_mode = False
+        self.normal_geometry = None
 
         # Moteur
         default_path = r"C:\Users\Nix\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\stockfish\stockfish-windows-x86-64-avx2.exe"
@@ -123,14 +125,17 @@ class ChessGUI:
 
         main = tk.Frame(self.master, bg=self.colors['bg'])
         main.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.main_frame = main
 
         # Gauche
         left = tk.Frame(main, bg=self.colors['bg'])
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.left_frame = left
 
         title = tk.Label(left, text="♟️ ENTRAÎNEUR D'ÉCHECS (rendu HD)",
                          font=("Arial", 20, "bold"), fg=self.colors['fg'], bg=self.colors['bg'])
         title.pack(pady=(0, 8))
+        self.title_label = title
 
         status_color = '#00ff00' if self.stockfish_ready else '#ff0000'
         status_text = ("✅ Stockfish connecté"
@@ -160,6 +165,7 @@ class ChessGUI:
         hist_frame = tk.LabelFrame(left, text="📜 Historique", fg=self.colors['fg'],
                                    bg=self.colors['panel'], font=("Arial", 11, "bold"))
         hist_frame.pack(fill=tk.BOTH, expand=False, pady=8)
+        self.history_frame = hist_frame
         self.moves_text = scrolledtext.ScrolledText(hist_frame, height=6,
                                                     bg=self.colors['bg'], fg=self.colors['fg'],
                                                     font=("Consolas", 10), state=tk.DISABLED)
@@ -169,6 +175,7 @@ class ChessGUI:
         right = tk.Frame(main, bg=self.colors['panel'], width=430)
         right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         right.pack_propagate(False)
+        self.right_frame = right
 
         # Contrôles de Jeu (manuel)
         controls = tk.LabelFrame(right, text="🎮 Contrôles de Jeu",
@@ -267,6 +274,11 @@ class ChessGUI:
                        fg=self.colors['fg'], bg=self.colors['panel'], selectcolor=self.colors['panel']).pack(side=tk.LEFT)
         tk.Button(r3, text="📁 Choisir Stockfish", command=self.choose_stockfish).pack(side=tk.RIGHT)
 
+        r4 = tk.Frame(opt, bg=self.colors['panel'])
+        r4.pack(fill=tk.X, padx=6, pady=4)
+        self.toggle_reduced_btn = tk.Button(r4, text="🗖 Plateau seul", command=self.toggle_reduced_mode)
+        self.toggle_reduced_btn.pack(fill=tk.X)
+
         # 🤖 Mode Auto (SFSF) — panneau et boutons
         auto = tk.LabelFrame(right, text="🤖 Mode Auto: Stockfish vs Stockfish",
                              fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
@@ -300,6 +312,9 @@ class ChessGUI:
         self.master.bind("<Key-S>", lambda e: self.stop_auto_game())
         self.master.bind("<Key-f>", lambda e: (self.flip_var.set(not self.flip_var.get()), self.toggle_flip()))
         self.master.bind("<Key-F>", lambda e: (self.flip_var.set(not self.flip_var.get()), self.toggle_flip()))
+        self.master.bind("<Key-m>", lambda e: self.toggle_reduced_mode())
+        self.master.bind("<Key-M>", lambda e: self.toggle_reduced_mode())
+        self.master.bind("<Escape>", lambda e: self.disable_reduced_mode())
 
     # ---------- Coordonnées & mapping ----------
     def square_to_coords(self, square):
@@ -878,6 +893,60 @@ Nuls: {s['draws']}"""
         self.update_clock_labels()
         status_color = '#00ff00' if self.stockfish_ready else '#ff0000'
         self.status_label.config(fg=status_color)
+
+    def toggle_reduced_mode(self):
+        if self.reduced_mode:
+            self.disable_reduced_mode()
+        else:
+            self.enable_reduced_mode()
+
+    def enable_reduced_mode(self):
+        if self.reduced_mode:
+            return
+        self.normal_geometry = self.master.geometry()
+        self.reduced_mode = True
+
+        # Masquer tout sauf le plateau
+        self.title_label.pack_forget()
+        self.status_label.pack_forget()
+        self.game_info.pack_forget()
+        self.eval_label.pack_forget()
+        self.history_frame.pack_forget()
+        self.right_frame.pack_forget()
+
+        # Réorganiser le canevas et les conteneurs
+        self.canvas.pack_forget()
+        self.canvas.pack(pady=0)
+        self.main_frame.pack_configure(fill=tk.NONE, expand=False, padx=0, pady=0)
+        self.left_frame.pack_configure(fill=tk.NONE, expand=False)
+
+        self.master.update_idletasks()
+        width = self.canvas.winfo_reqwidth()
+        height = self.canvas.winfo_reqheight()
+        self.master.geometry(f"{width}x{height}")
+        self.toggle_reduced_btn.config(text="🗗 Mode complet")
+
+    def disable_reduced_mode(self):
+        if not self.reduced_mode:
+            return
+        self.reduced_mode = False
+
+        # Restaurer la disposition complète
+        self.main_frame.pack_configure(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.left_frame.pack_configure(fill=tk.BOTH, expand=True)
+
+        self.canvas.pack_forget()
+        self.title_label.pack(pady=(0, 8))
+        self.status_label.pack()
+        self.canvas.pack(pady=10)
+        self.game_info.pack(pady=6)
+        self.eval_label.pack(pady=(0, 6))
+        self.history_frame.pack(fill=tk.BOTH, expand=False, pady=8)
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+
+        if self.normal_geometry:
+            self.master.geometry(self.normal_geometry)
+        self.toggle_reduced_btn.config(text="🗖 Plateau seul")
 
     def _recolor_recursive(self, widget):
         try:
