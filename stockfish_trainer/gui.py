@@ -275,17 +275,7 @@ class ChessGUI:
         self.actions_frame.pack(fill=tk.X, pady=(12, 0))
         self.actions_frame.columnconfigure((0, 1), weight=1)
 
-        self.start_btn = tk.Button(self.actions_frame,
-                                   text="🎯 Nouvelle partie",
-                                   command=self.start_new_game,
-                                   bg='#4CAF50',
-                                   fg='white',
-                                   font=("Arial", 10, "bold"),
-                                   relief=tk.FLAT,
-                                   padx=8,
-                                   pady=6)
-        self.start_btn.grid(row=0, column=0, columnspan=2, sticky="ew", padx=4, pady=2)
-
+        self.start_btn = None
         self.hint_btn = tk.Button(self.actions_frame,
                                   text="💡 Indice",
                                   command=self.show_hint,
@@ -295,7 +285,7 @@ class ChessGUI:
                                   relief=tk.FLAT,
                                   padx=8,
                                   pady=6)
-        self.hint_btn.grid(row=1, column=0, sticky="ew", padx=4, pady=2)
+        self.hint_btn.grid(row=0, column=0, sticky="ew", padx=4, pady=2)
 
         self.clear_hint_btn = tk.Button(self.actions_frame,
                                         text="🧽 Effacer",
@@ -306,18 +296,7 @@ class ChessGUI:
                                         relief=tk.FLAT,
                                         padx=8,
                                         pady=6)
-        self.clear_hint_btn.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
-
-        self.resign_btn = tk.Button(self.actions_frame,
-                                    text="🏳️ Abandonner",
-                                    command=self.resign_game,
-                                    bg='#f44336',
-                                    fg='white',
-                                    font=("Arial", 10, "bold"),
-                                    relief=tk.FLAT,
-                                    padx=8,
-                                    pady=6)
-        self.resign_btn.grid(row=2, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 2))
+        self.clear_hint_btn.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
 
         self.secondary_actions_frame = tk.Frame(left, bg=self.colors['bg'])
         self.register_widget(self.secondary_actions_frame, 'bg')
@@ -528,6 +507,17 @@ class ChessGUI:
                                             padx=10,
                                             pady=10)
         self.start_game_tab_btn.pack(fill=tk.X, padx=20, pady=(4, 16))
+
+        self.resign_btn = tk.Button(self.game_tab,
+                                    text="🏳️ Abandonner",
+                                    command=self.resign_game,
+                                    bg='#f44336',
+                                    fg='white',
+                                    font=("Arial", 11, "bold"),
+                                    relief=tk.FLAT,
+                                    padx=10,
+                                    pady=10)
+        self.resign_btn.pack(fill=tk.X, padx=20, pady=(0, 12))
 
         self.clock_white_lbl = tk.Label(clock_frame,
                                         text="Blancs: 05:00",
