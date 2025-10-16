@@ -11,7 +11,7 @@ import chess
 import chess.pgn
 import chess.svg
 import tkinter as tk
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 import cairosvg
 
@@ -30,13 +30,6 @@ class ChessGUI:
         self.theme_dark = True
         self.colors = self.get_colors(self.theme_dark)
         self.master.configure(bg=self.colors['bg'])
-        self.reduced_mode = False
-        self.normal_geometry = None
-        self.overlay_mode = False
-        self.overlay_transparent_color = "#010203"
-        self.overlay_hint_in_progress = False
-        self.overlay_forced_reduced = False
-        self.overlay_transparency_supported = None
         self._theme_widgets = []
 
         # Moteur
@@ -697,7 +690,7 @@ class ChessGUI:
         engine_buttons = tk.Frame(self.engine_tab, bg=self.colors['panel'])
         self.register_widget(engine_buttons, 'panel')
         engine_buttons.pack(fill=tk.X, padx=12, pady=(0, 8))
-        engine_buttons.columnconfigure((0, 1), weight=1)
+        engine_buttons.columnconfigure(0, weight=1)
 
         choose_btn = tk.Button(engine_buttons,
                                text="📁 Choisir Stockfish",
@@ -709,31 +702,6 @@ class ChessGUI:
                                pady=6)
         self.register_widget(choose_btn, 'panel', include_fg=True)
         choose_btn.grid(row=0, column=0, sticky="ew", padx=4)
-
-        self.toggle_reduced_btn = tk.Button(engine_buttons,
-                                            text="🗖 Plateau seul",
-                                            command=self.toggle_reduced_mode,
-                                            bg=self.colors['panel'],
-                                            fg=self.colors['fg'],
-                                            relief=tk.FLAT,
-                                            padx=6,
-                                            pady=6)
-        self.register_widget(self.toggle_reduced_btn, 'panel', include_fg=True)
-        self.toggle_reduced_btn.grid(row=0, column=1, sticky="ew", padx=4)
-
-        overlay_btn_row = tk.Frame(self.engine_tab, bg=self.colors['panel'])
-        self.register_widget(overlay_btn_row, 'panel')
-        overlay_btn_row.pack(fill=tk.X, padx=12, pady=(0, 12))
-        self.toggle_overlay_btn = tk.Button(overlay_btn_row,
-                                            text="🪄 Mode overlay transparent",
-                                            command=self.toggle_overlay_mode,
-                                            bg=self.colors['panel'],
-                                            fg=self.colors['fg'],
-                                            relief=tk.FLAT,
-                                            padx=6,
-                                            pady=6)
-        self.register_widget(self.toggle_overlay_btn, 'panel', include_fg=True)
-        self.toggle_overlay_btn.pack(fill=tk.X)
 
         self.auto_tab = tk.Frame(notebook, bg=self.colors['panel'])
         self.register_widget(self.auto_tab, 'panel')
@@ -830,10 +798,6 @@ class ChessGUI:
         self.master.bind("<Key-S>", lambda e: self.stop_auto_game())
         self.master.bind("<Key-f>", lambda e: (self.flip_var.set(not self.flip_var.get()), self.toggle_flip()))
         self.master.bind("<Key-F>", lambda e: (self.flip_var.set(not self.flip_var.get()), self.toggle_flip()))
-        self.master.bind("<Key-m>", lambda e: self.toggle_reduced_mode())
-        self.master.bind("<Key-M>", lambda e: self.toggle_reduced_mode())
-        self.master.bind("<Key-o>", lambda e: self.toggle_overlay_mode())
-        self.master.bind("<Key-O>", lambda e: self.toggle_overlay_mode())
         self.master.bind("<Escape>", self.on_escape)
 
 
@@ -950,7 +914,7 @@ class ChessGUI:
             if expected not in self.board.legal_moves:
                 self.finish_training_mode(success=False, reason="séquence non disponible depuis cette position")
                 return
-            if not self.overlay_mode and self.increment > 0:
+            if self.increment > 0:
                 if self.board.turn == chess.WHITE:
                     self.time_white += self.increment
                 else:
@@ -982,7 +946,7 @@ class ChessGUI:
             except Exception:
                 pass
             if (self.stockfish_ready and not self.board.is_game_over() and not self.auto_mode
-                    and not self.overlay_mode and self.board.turn != self.player_color):
+                    and self.board.turn != self.player_color):
                 self.master.after(600, self.stockfish_move_once_for_manual)
         else:
             info = "⚠️ Séquence interrompue."
@@ -997,7 +961,7 @@ class ChessGUI:
 
     # ---------- Coordonnées & mapping ----------
     def get_board_padding(self):
-        return 0 if self.overlay_mode else self.PADDING
+        return self.PADDING
 
     def get_canvas_size(self):
         pad = self.get_board_padding()
@@ -1036,35 +1000,6 @@ class ChessGUI:
 
     # ---------- Rendu plateau ----------
     def render_board_image(self):
-        if self.overlay_mode:
-            svg = chess.svg.board(
-                board=self.board,
-                lastmove=self.last_move,
-                size=self.BOARD_SIZE,
-                coordinates=False,
-                squares=None,
-                colors={
-                    "square light": "none",
-                    "square dark": "none",
-                    "frame": "none",
-                    "border": "none"
-                },
-                borders=False
-            )
-            png_bytes = cairosvg.svg2png(bytestring=svg.encode('utf-8'),
-                                         output_width=self.BOARD_SIZE,
-                                         output_height=self.BOARD_SIZE,
-                                         background_color=None)
-            img = Image.open(BytesIO(png_bytes)).convert("RGBA")
-            draw = ImageDraw.Draw(img)
-            sq = self.BOARD_SIZE // 8
-            line_color = (255, 255, 255, 200) if self.theme_dark else (20, 20, 20, 200)
-            for i in range(9):
-                pos = i * sq
-                draw.line([(pos, 0), (pos, self.BOARD_SIZE)], fill=line_color, width=2)
-                draw.line([(0, pos), (self.BOARD_SIZE, pos)], fill=line_color, width=2)
-            return img
-
         svg = chess.svg.board(
             board=self.board,
             lastmove=self.last_move,
@@ -1078,8 +1013,6 @@ class ChessGUI:
 
     def draw_coordinates(self):
         self.canvas.delete("coord")
-        if self.overlay_mode:
-            return
         sq = self.BOARD_SIZE // 8
         pad = self.get_board_padding()
         # Files
@@ -1138,7 +1071,7 @@ class ChessGUI:
         self.tk_img = ImageTk.PhotoImage(img)
         size = self.get_canvas_size()
         pad = self.get_board_padding()
-        bg_color = self.overlay_transparent_color if self.overlay_mode else self.colors['bg']
+        bg_color = self.colors['bg']
         self.canvas.config(width=size, height=size)
         self.canvas.configure(bg=bg_color)
         self.canvas.delete("board")
@@ -1187,7 +1120,7 @@ class ChessGUI:
     def on_canvas_click(self, event):
         if not self.game_active or self.auto_mode:
             return
-        if not self.overlay_mode and self.board.turn != self.player_color:
+        if self.board.turn != self.player_color:
             return
 
         square = self.coords_to_square(event.x, event.y)
@@ -1202,7 +1135,7 @@ class ChessGUI:
                 self.legal_targets_cache = set()
                 self.update_board_display()
                 return
-            allowed_color = self.board.turn if self.overlay_mode else self.player_color
+            allowed_color = self.player_color
             if piece and piece.color == allowed_color:
                 self.selected_square = square
                 self.legal_targets_cache = {mv.to_square for mv in self.board.legal_moves if mv.from_square == square}
@@ -1226,7 +1159,7 @@ class ChessGUI:
             self.update_board_display()
             return
 
-        allowed_color = self.board.turn if self.overlay_mode else self.player_color
+        allowed_color = self.player_color
         if piece and piece.color == allowed_color:
             self.selected_square = square
             self.legal_targets_cache = {mv.to_square for mv in self.board.legal_moves if mv.from_square == square}
@@ -1247,7 +1180,7 @@ class ChessGUI:
             if expected is None:
                 self.finish_training_mode(success=True)
                 if (self.stockfish_ready and not self.board.is_game_over() and not self.auto_mode
-                        and not self.overlay_mode and self.board.turn != self.player_color):
+                        and self.board.turn != self.player_color):
                     self.master.after(120, self.stockfish_move_once_for_manual)
                 return
             if move != expected:
@@ -1260,11 +1193,10 @@ class ChessGUI:
                 return
             training_player_move = True
 
-        if not self.overlay_mode:
-            if self.board.turn == chess.WHITE and self.increment > 0:
-                self.time_white += self.increment
-            elif self.board.turn == chess.BLACK and self.increment > 0:
-                self.time_black += self.increment
+        if self.board.turn == chess.WHITE and self.increment > 0:
+            self.time_white += self.increment
+        elif self.board.turn == chess.BLACK and self.increment > 0:
+            self.time_black += self.increment
         self.board.push(move)
         self.last_move = move
         self.move_stack_for_redo.clear()
@@ -1273,22 +1205,6 @@ class ChessGUI:
             self.training_index += 1
             self.update_training_progress()
         self.update_board_display()
-
-        if self.overlay_mode:
-            if self.board.is_game_over():
-                self.game_active = False
-                try:
-                    result = self.board.result()
-                except Exception:
-                    result = ""
-                if result:
-                    self.add_analysis(f"🏁 Position terminée ({result}).")
-                else:
-                    self.add_analysis("🏁 Position terminée.")
-            else:
-                self.request_overlay_suggestion()
-            self.update_clock_labels()
-            return
 
         if self.training_active:
             if self.board.is_game_over():
@@ -1364,18 +1280,6 @@ class ChessGUI:
                             self.schedule_next_auto_move()
                     else:
                         self.stop_auto_game()
-
-                elif kind == "overlay_hint":
-                    mv = payload
-                    if self.overlay_mode:
-                        self.animate_hint_arrow(mv)
-                        try:
-                            self.add_analysis(f"🎯 Coup recommandé: {mv.uci()}")
-                        except Exception:
-                            pass
-
-                elif kind == "overlay_hint_done":
-                    self.overlay_hint_in_progress = False
 
                 elif kind == "engine_error":
                     self.add_analysis("❌ Erreur moteur: " + str(payload))
@@ -1469,13 +1373,7 @@ class ChessGUI:
         self.moves_text.config(state=tk.DISABLED)
 
     def update_game_info(self):
-        if self.overlay_mode:
-            if self.game_active:
-                turn = "Blancs" if self.board.turn == chess.WHITE else "Noirs"
-                info = f"Overlay manuel - Tour des {turn}"
-            else:
-                info = "Overlay manuel en pause"
-        elif self.game_active:
+        if self.game_active:
             if self.auto_mode:
                 info = "Mode Auto: Stockfish vs Stockfish"
             else:
@@ -1508,9 +1406,6 @@ class ChessGUI:
         self.last_move = self.board.move_stack[-1] if self.board.move_stack else None
         self.hint_move = None
         self.update_board_display()
-        if self.overlay_mode:
-            self.game_active = True
-            self.request_overlay_suggestion()
 
     def redo_move(self):
         if not self.move_stack_for_redo or self.auto_mode:
@@ -1521,9 +1416,6 @@ class ChessGUI:
             self.last_move = mv
             self.hint_move = None
             self.update_board_display()
-            if self.overlay_mode:
-                self.game_active = True
-                self.request_overlay_suggestion()
 
     # ---------- PGN ----------
     def export_pgn(self):
@@ -1687,190 +1579,15 @@ Nuls: {s['draws']}"""
         self.configure_ttk_styles()
         self.master.configure(bg=self.colors['bg'])
         self.apply_theme_to_widgets()
-        if self.overlay_mode:
-            self.apply_overlay_transparency()
         self.update_board_display()
         self.update_clock_labels()
         status_color = '#00ff00' if self.stockfish_ready else '#ff0000'
         self.status_label.config(fg=status_color)
 
-    def toggle_reduced_mode(self):
-        if self.overlay_mode:
-            messagebox.showinfo("Mode overlay", "Désactivez d'abord le mode overlay transparent.")
-            return
-        if self.reduced_mode:
-            self.disable_reduced_mode()
-        else:
-            self.enable_reduced_mode()
-
-    def toggle_overlay_mode(self):
-        if self.overlay_mode:
-            self.disable_overlay_mode()
-        else:
-            self.enable_overlay_mode()
-
-    def enable_overlay_mode(self):
-        if self.overlay_mode:
-            return
-        if not self.stockfish_ready:
-            messagebox.showerror("Overlay", "Stockfish doit être connecté pour le mode overlay.")
-            return
-        self.stop_auto_game()
-        self.stop_clock()
-        self.overlay_hint_in_progress = False
-        self.overlay_forced_reduced = not self.reduced_mode
-        if not self.reduced_mode:
-            self.enable_reduced_mode()
-        self.overlay_mode = True
-        self.apply_overlay_transparency()
-        self.toggle_overlay_btn.config(text="↩️ Quitter Overlay", state=tk.NORMAL)
-        try:
-            self.toggle_reduced_btn.config(state=tk.DISABLED)
-        except Exception:
-            pass
-        self.start_overlay_session()
-
-    def start_overlay_session(self):
-        self.board.reset()
+    def on_escape(self, event=None):
         self.selected_square = None
         self.legal_targets_cache = set()
-        self.last_move = None
-        self.move_stack_for_redo.clear()
-        self.hint_move = None
-        self.game_active = True
-        self.auto_mode = False
-        self.player_color = chess.WHITE
-        self.time_white = 0
-        self.time_black = 0
-        self.increment = 0
-        self.update_clock_labels()
         self.update_board_display()
-        self.add_analysis("🪄 Mode overlay manuel activé. Entrez chaque coup et Stockfish proposera un coup idéal. (Échap pour quitter l'overlay)")
-        self.request_overlay_suggestion()
-
-    def request_overlay_suggestion(self):
-        if not self.overlay_mode or not self.game_active or not self.stockfish_ready:
-            return
-        if self.overlay_hint_in_progress:
-            return
-        self.overlay_hint_in_progress = True
-
-        def worker():
-            move_uci = None
-            try:
-                self.stockfish.set_position([m.uci() for m in self.board.move_stack])
-                move_uci = self.stockfish.get_best_move()
-                if move_uci:
-                    mv = chess.Move.from_uci(move_uci)
-                    self.engine_queue.put(("overlay_hint", mv))
-            except Exception as e:
-                self.engine_queue.put(("engine_error", str(e)))
-            finally:
-                self.engine_queue.put(("overlay_hint_done", None))
-        threading.Thread(target=worker, daemon=True).start()
-
-    def disable_overlay_mode(self):
-        if not self.overlay_mode:
-            return
-        self.overlay_mode = False
-        self.overlay_hint_in_progress = False
-        self.toggle_overlay_btn.config(text="🪄 Mode Overlay Transparent", state=tk.NORMAL)
-        try:
-            self.toggle_reduced_btn.config(state=tk.NORMAL)
-        except Exception:
-            pass
-        self.remove_overlay_transparency()
-        if self.overlay_forced_reduced and self.reduced_mode:
-            self.disable_reduced_mode()
-        self.overlay_forced_reduced = False
-        self.clear_hint()
-        self.update_board_display()
-
-    def apply_overlay_transparency(self):
-        color = self.overlay_transparent_color
-        try:
-            self.master.wm_attributes("-transparentcolor", color)
-            self.overlay_transparency_supported = True
-        except tk.TclError:
-            if self.overlay_transparency_supported is None:
-                self.add_analysis("⚠️ Transparence native indisponible sur cette plateforme.")
-            self.overlay_transparency_supported = False
-        for widget in (self.master, self.main_frame, self.left_frame, self.board_frame, self.canvas):
-            try:
-                widget.configure(bg=color)
-            except Exception:
-                pass
-        for widget in (self.header_frame, self.info_frame, self.actions_frame,
-                       self.secondary_actions_frame, self.history_frame, self.right_frame):
-            try:
-                widget.configure(bg=color)
-            except Exception:
-                pass
-
-    def remove_overlay_transparency(self):
-        try:
-            self.master.wm_attributes("-transparentcolor", "")
-        except tk.TclError:
-            pass
-        self.master.configure(bg=self.colors['bg'])
-        self.apply_theme_to_widgets()
-
-    def on_escape(self, event=None):
-        if self.overlay_mode:
-            self.disable_overlay_mode()
-        else:
-            self.disable_reduced_mode()
-
-    def enable_reduced_mode(self):
-        if self.reduced_mode:
-            return
-        self.normal_geometry = self.master.geometry()
-        self.reduced_mode = True
-
-        for widget in (
-            self.header_frame,
-            self.info_frame,
-            self.actions_frame,
-            self.secondary_actions_frame,
-            self.history_frame,
-            self.right_frame,
-        ):
-            try:
-                widget.pack_forget()
-            except Exception:
-                pass
-
-        self.board_frame.pack_configure(pady=0)
-        self.main_frame.pack_configure(fill=tk.NONE, expand=False, padx=0, pady=0)
-        self.left_frame.pack_configure(fill=tk.NONE, expand=False)
-
-        self.master.update_idletasks()
-        width = self.canvas.winfo_reqwidth()
-        height = self.canvas.winfo_reqheight()
-        self.master.geometry(f"{width}x{height}")
-        self.toggle_reduced_btn.config(text="🗗 Mode complet")
-
-    def disable_reduced_mode(self):
-        if not self.reduced_mode:
-            return
-        self.reduced_mode = False
-
-        self.main_frame.pack_configure(fill=tk.BOTH, expand=True, padx=16, pady=16)
-        self.left_frame.pack_configure(fill=tk.BOTH, expand=True)
-
-        self.board_frame.pack_forget()
-        self.header_frame.pack(fill=tk.X)
-        self.board_frame.pack(pady=(12, 0))
-        self.info_frame.pack(fill=tk.X, pady=(12, 0))
-        self.actions_frame.pack(fill=tk.X, pady=(12, 0))
-        self.secondary_actions_frame.pack(fill=tk.X, pady=(4, 0))
-        self.history_frame.pack(fill=tk.BOTH, expand=False, pady=(12, 0))
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(16, 0))
-
-        if self.normal_geometry:
-            self.master.geometry(self.normal_geometry)
-        self.toggle_reduced_btn.config(text="🗖 Plateau seul")
-        self.apply_theme_to_widgets()
 
     def _recolor_recursive(self, widget):
         """Compatibilité : applique la palette actuelle aux widgets."""
@@ -1902,9 +1619,6 @@ Nuls: {s['draws']}"""
 
     # ---------- Démarrer/Finir (manuel) ----------
     def start_new_game(self):
-        if self.overlay_mode:
-            messagebox.showinfo("Mode overlay", "Désactivez le mode overlay pour lancer une partie classique.")
-            return
         selected_opening = self.training_opening_var.get()
         opening_data = self.training_lines.get(selected_opening, {})
         training_requested = self.training_mode_var.get() and bool(opening_data.get("moves"))
@@ -2018,9 +1732,6 @@ Nuls: {s['draws']}"""
 
     # ---------- 🤖 Auto: Stockfish vs Stockfish ----------
     def start_auto_game(self):
-        if self.overlay_mode:
-            messagebox.showinfo("Mode overlay", "Désactivez le mode overlay pour lancer l'autoplay.")
-            return
         if not self.stockfish_ready:
             messagebox.showerror("Erreur", "Stockfish n'est pas disponible !")
             return
