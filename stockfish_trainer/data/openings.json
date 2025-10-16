@@ -1,0 +1,85 @@
+{
+  "Libre": {
+    "description": "Mode libre sans séquence imposée.",
+    "recommended_color": null,
+    "moves": []
+  },
+  "Défense Caro-Kann (Classique)": {
+    "description": "1.e4 c6 2.d4 d5 3.Nc3 dxe4 4.Nxe4 Bf5 5.Ng3 Bg6 6.h4 h6",
+    "recommended_color": "noirs",
+    "moves": [
+      "e4",
+      "c6",
+      "d4",
+      "d5",
+      "Nc3",
+      "dxe4",
+      "Nxe4",
+      "Bf5",
+      "Ng3",
+      "Bg6",
+      "h4",
+      "h6"
+    ]
+  },
+  "Défense Sicilienne (Najdorf)": {
+    "description": "1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 a6",
+    "recommended_color": "noirs",
+    "moves": [
+      "e4",
+      "c5",
+      "Nf3",
+      "d6",
+      "d4",
+      "cxd4",
+      "Nxd4",
+      "Nf6",
+      "Nc3",
+      "a6"
+    ]
+  },
+  "Défense Française (Classique)": {
+    "description": "1.e4 e6 2.d4 d5 3.Nc3 Nf6 4.Bg5 Be7",
+    "recommended_color": "noirs",
+    "moves": [
+      "e4",
+      "e6",
+      "d4",
+      "d5",
+      "Nc3",
+      "Nf6",
+      "Bg5",
+      "Be7"
+    ]
+  },
+  "Ouverture Espagnole (Défense Morphy)": {
+    "description": "1.e4 e5 2.Nf3 Nc6 3.Bb5 a6 4.Ba4 Nf6 5.O-O Be7",
+    "recommended_color": "noirs",
+    "moves": [
+      "e4",
+      "e5",
+      "Nf3",
+      "Nc6",
+      "Bb5",
+      "a6",
+      "Ba4",
+      "Nf6",
+      "O-O",
+      "Be7"
+    ]
+  },
+  "Gambit Dame refusé": {
+    "description": "1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Bg5 Be7",
+    "recommended_color": "noirs",
+    "moves": [
+      "d4",
+      "d5",
+      "c4",
+      "e6",
+      "Nc3",
+      "Nf6",
+      "Bg5",
+      "Be7"
+    ]
+  }
+}
