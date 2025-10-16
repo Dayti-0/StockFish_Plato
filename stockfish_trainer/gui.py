@@ -16,7 +16,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 import cairosvg
 
 from .engine import SafeStockfish
-from .utils import clamp
+from .utils import MINIMAL_OPENINGS, clamp, load_training_openings
 
 class ChessGUI:
     BOARD_SIZE = 640
@@ -84,6 +84,11 @@ class ChessGUI:
         self.training_description_var = tk.StringVar(value="Mode libre sans séquence imposée.")
         self.training_status_var = tk.StringVar(value="Mode libre")
         self.training_lines = self.load_default_openings()
+        if self.training_lines and self.training_opening_var.get() not in self.training_lines:
+            first_opening = next(iter(self.training_lines))
+            self.training_opening_var.set(first_opening)
+            description = self.training_lines[first_opening].get("description", "")
+            self.training_description_var.set(description)
         self.training_line = []
         self.training_index = 0
         self.training_active = False
@@ -805,49 +810,10 @@ class ChessGUI:
     # ---------- Entraînement d'ouvertures ----------
 
     def load_default_openings(self):
-        return {
-            "Libre": {
-                "moves": [],
-                "description": "Mode libre sans séquence imposée.",
-                "recommended_color": None,
-            },
-            "Défense Caro-Kann (Classique)": {
-                "moves": [
-                    "e4", "c6", "d4", "d5", "Nc3", "dxe4", "Nxe4", "Bf5",
-                    "Ng3", "Bg6", "h4", "h6",
-                ],
-                "description": "1.e4 c6 2.d4 d5 3.Nc3 dxe4 4.Nxe4 Bf5 5.Ng3 Bg6 6.h4 h6",
-                "recommended_color": "noirs",
-            },
-            "Défense Sicilienne (Najdorf)": {
-                "moves": [
-                    "e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6",
-                ],
-                "description": "1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 a6",
-                "recommended_color": "noirs",
-            },
-            "Défense Française (Classique)": {
-                "moves": [
-                    "e4", "e6", "d4", "d5", "Nc3", "Nf6", "Bg5", "Be7",
-                ],
-                "description": "1.e4 e6 2.d4 d5 3.Nc3 Nf6 4.Bg5 Be7",
-                "recommended_color": "noirs",
-            },
-            "Ouverture Espagnole (Défense Morphy)": {
-                "moves": [
-                    "e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O", "Be7",
-                ],
-                "description": "1.e4 e5 2.Nf3 Nc6 3.Bb5 a6 4.Ba4 Nf6 5.O-O Be7",
-                "recommended_color": "noirs",
-            },
-            "Gambit Dame refusé": {
-                "moves": [
-                    "d4", "d5", "c4", "e6", "Nc3", "Nf6", "Bg5", "Be7",
-                ],
-                "description": "1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Bg5 Be7",
-                "recommended_color": "noirs",
-            },
-        }
+        openings = load_training_openings(fallback=MINIMAL_OPENINGS)
+        if not openings:
+            return {key: dict(value) for key, value in MINIMAL_OPENINGS.items()}
+        return openings
 
     def on_training_toggle(self):
         if not self.training_mode_var.get():
