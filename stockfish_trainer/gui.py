@@ -1011,12 +1011,14 @@ class ChessGUI:
 
     # ---------- Rendu plateau ----------
     def render_board_image(self):
+        orientation = chess.BLACK if self.flip_board else chess.WHITE
         svg = chess.svg.board(
             board=self.board,
             lastmove=self.last_move,
             size=self.BOARD_SIZE,
             coordinates=False,
-            squares=None
+            squares=None,
+            orientation=orientation
         )
         png_bytes = cairosvg.svg2png(bytestring=svg.encode('utf-8'),
                                      output_width=self.BOARD_SIZE, output_height=self.BOARD_SIZE)
