@@ -10,7 +10,7 @@ from typing import Dict, Iterable, Mapping, Optional, Union
 
 MINIMAL_OPENINGS: Dict[str, Dict[str, object]] = {
     "Libre": {
-        "moves": [],
+        "variations": [],
         "description": "Mode libre sans séquence imposée.",
         "recommended_color": None,
     }
@@ -55,8 +55,9 @@ def load_training_openings(
     Returns
     -------
     dict
-        Dictionary keyed by opening name with ``moves`` (list of SAN strings),
-        ``description`` and ``recommended_color`` metadata.
+        Dictionary keyed by opening name with ``variations`` definitions, plus
+        ``description`` and ``recommended_color`` metadata. Each variation
+        contains a ``name`` and a ``moves`` list (SAN strings).
     """
 
     fallback_data: Mapping[str, Mapping[str, object]] = fallback or MINIMAL_OPENINGS
@@ -74,14 +75,55 @@ def load_training_openings(
             if not isinstance(entry, dict):
                 raise ValueError(f"Entrée invalide pour '{name}'.")
 
-            moves = entry.get("moves", [])
-            if moves is None:
-                moves = []
-            if not isinstance(moves, list):
+            variations_data = entry.get("variations")
+            if variations_data is None and "moves" in entry:
+                variations_data = [
+                    {
+                        "name": entry.get("variation_name"),
+                        "moves": entry.get("moves", []),
+                    }
+                ]
+
+            if variations_data is None:
+                variations_data = []
+
+            if not isinstance(variations_data, list):
                 raise ValueError(
-                    f"La séquence de coups pour '{name}' doit être une liste."
+                    f"Les variations pour '{name}' doivent être fournies sous forme de liste."
                 )
-            normalized_moves = [str(move) for move in moves]
+
+            normalized_variations = []
+            for idx, variation in enumerate(variations_data):
+                if variation is None:
+                    continue
+                if isinstance(variation, list):
+                    variation_entry = {"moves": variation}
+                elif isinstance(variation, dict):
+                    variation_entry = variation
+                else:
+                    raise ValueError(
+                        f"Variation invalide à l'indice {idx} pour '{name}'."
+                    )
+
+                moves = variation_entry.get("moves", [])
+                if moves is None:
+                    moves = []
+                if not isinstance(moves, list):
+                    raise ValueError(
+                        f"La séquence de coups pour la variation {idx + 1} de '{name}' doit être une liste."
+                    )
+                normalized_moves = [str(move) for move in moves]
+
+                var_name = variation_entry.get("name")
+                if var_name is None or str(var_name).strip() == "":
+                    var_name = f"Variante {idx + 1}"
+                else:
+                    var_name = str(var_name)
+
+                normalized_variations.append({
+                    "name": var_name,
+                    "moves": normalized_moves,
+                })
 
             recommended_color = entry.get("recommended_color")
             if recommended_color is not None and not isinstance(
@@ -90,7 +132,7 @@ def load_training_openings(
                 recommended_color = str(recommended_color)
 
             normalized[name] = {
-                "moves": normalized_moves,
+                "variations": normalized_variations,
                 "description": str(entry.get("description", "")),
                 "recommended_color": recommended_color,
             }
