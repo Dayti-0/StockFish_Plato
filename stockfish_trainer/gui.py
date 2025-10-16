@@ -37,6 +37,7 @@ class ChessGUI:
         self.overlay_hint_in_progress = False
         self.overlay_forced_reduced = False
         self.overlay_transparency_supported = None
+        self._theme_widgets = []
 
         # Moteur
         default_path = r"C:\Users\Nix\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\stockfish\stockfish-windows-x86-64-avx2.exe"
@@ -123,190 +124,630 @@ class ChessGUI:
                 'arrow': '#0288d1'
             }
 
-    # ---------- UI ----------
-    def setup_ui(self):
+    def configure_ttk_styles(self):
+        """Configure ttk components so they follow the current palette."""
         style = ttk.Style()
-        style.theme_use('clam')
+        try:
+            style.theme_use('clam')
+        except tk.TclError:
+            # Le thème peut déjà être appliqué sur certaines plateformes.
+            pass
+        style.configure("TNotebook", background=self.colors['panel'], borderwidth=0)
+        style.configure("TNotebook.Tab",
+                        background=self.colors['panel'],
+                        foreground=self.colors['fg'],
+                        padding=(12, 6))
+        style.map("TNotebook.Tab",
+                  background=[("selected", self.colors['accent'])],
+                  foreground=[("selected", "#ffffff")])
+        style.configure("TFrame", background=self.colors['panel'])
+        style.configure("TLabel", background=self.colors['panel'], foreground=self.colors['fg'])
+        self._ttk_style = style
+
+    def register_widget(self, widget, palette='bg', include_fg=False):
+        """Enregistre un widget pour la mise à jour automatique des couleurs."""
+        self._theme_widgets.append((widget, palette, include_fg))
+
+    def apply_theme_to_widgets(self):
+        for widget, palette, include_fg in self._theme_widgets:
+            bg_color = self.colors['bg'] if palette == 'bg' else self.colors['panel']
+            try:
+                widget.configure(bg=bg_color)
+            except Exception:
+                pass
+            if include_fg:
+                try:
+                    widget.configure(fg=self.colors['fg'])
+                except Exception:
+                    pass
+            if isinstance(widget, (tk.Text, scrolledtext.ScrolledText)):
+                try:
+                    widget.configure(bg=bg_color, fg=self.colors['fg'], insertbackground=self.colors['fg'])
+                except Exception:
+                    pass
+            if isinstance(widget, tk.Canvas):
+                try:
+                    widget.configure(bg=bg_color)
+                except Exception:
+                    pass
+            if isinstance(widget, tk.Scale):
+                try:
+                    widget.configure(troughcolor='#555555' if self.theme_dark else '#d0d0d0',
+                                     highlightbackground=bg_color,
+                                     activebackground=self.colors['accent'])
+                except Exception:
+                    pass
+            if isinstance(widget, (tk.Radiobutton, tk.Checkbutton)):
+                try:
+                    widget.configure(selectcolor=bg_color, activebackground=bg_color)
+                except Exception:
+                    pass
+            if isinstance(widget, tk.Spinbox):
+                try:
+                    widget.configure(readonlybackground=bg_color, highlightbackground=bg_color)
+                except Exception:
+                    pass
+            if isinstance(widget, tk.Button):
+                try:
+                    widget.configure(activebackground=self.colors['accent'])
+                except Exception:
+                    pass
+
+    # ---------- UI ----------
+
+    def setup_ui(self):
+        self.configure_ttk_styles()
+        self.register_widget(self.master, 'bg')
 
         main = tk.Frame(self.master, bg=self.colors['bg'])
-        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.register_widget(main, 'bg')
+        main.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
         self.main_frame = main
 
-        # Gauche
         left = tk.Frame(main, bg=self.colors['bg'])
+        self.register_widget(left, 'bg')
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.left_frame = left
 
-        title = tk.Label(left, text="♟️ ENTRAÎNEUR D'ÉCHECS (rendu HD)",
-                         font=("Arial", 20, "bold"), fg=self.colors['fg'], bg=self.colors['bg'])
-        title.pack(pady=(0, 8))
-        self.title_label = title
+        self.header_frame = tk.Frame(left, bg=self.colors['bg'])
+        self.register_widget(self.header_frame, 'bg')
+        self.header_frame.pack(fill=tk.X)
+
+        self.title_label = tk.Label(self.header_frame,
+                                    text="♟️ ENTRAÎNEUR D'ÉCHECS",
+                                    font=("Arial", 20, "bold"),
+                                    fg=self.colors['fg'],
+                                    bg=self.colors['bg'])
+        self.register_widget(self.title_label, 'bg', include_fg=True)
+        self.title_label.pack(anchor='w')
 
         status_color = '#00ff00' if self.stockfish_ready else '#ff0000'
         status_text = ("✅ Stockfish connecté"
                        if self.stockfish_ready else "❌ Erreur Stockfish (Options > Choisir Stockfish)")
-        self.status_label = tk.Label(left, text=status_text, font=("Arial", 10),
-                                     fg=status_color, bg=self.colors['bg'])
-        self.status_label.pack()
+        self.status_label = tk.Label(self.header_frame,
+                                     text=status_text,
+                                     font=("Arial", 10),
+                                     fg=status_color,
+                                     bg=self.colors['bg'])
+        self.register_widget(self.status_label, 'bg', include_fg=True)
+        self.status_label.pack(anchor='w', pady=(6, 0))
 
-        # Canvas
-        self.canvas = tk.Canvas(left, width=self.CANVAS_SIZE, height=self.CANVAS_SIZE,
-                                bg=self.colors['bg'], highlightthickness=0, cursor="hand2")
-        self.canvas.pack(pady=10)
+        self.board_frame = tk.Frame(left, bg=self.colors['bg'])
+        self.register_widget(self.board_frame, 'bg')
+        self.board_frame.pack(pady=(12, 0))
+
+        self.canvas = tk.Canvas(self.board_frame,
+                                width=self.CANVAS_SIZE,
+                                height=self.CANVAS_SIZE,
+                                bg=self.colors['bg'],
+                                highlightthickness=0,
+                                cursor="hand2")
+        self.register_widget(self.canvas, 'bg')
+        self.canvas.pack()
         self.canvas.bind("<Button-1>", self.on_canvas_click)
-        self.canvas.bind("<Button-3>", self.on_right_click)  # clic droit: désélection
+        self.canvas.bind("<Button-3>", self.on_right_click)
 
-        # Infos
-        self.game_info = tk.Label(left, text="Nouvelle partie", font=("Arial", 12),
-                                  fg=self.colors['fg'], bg=self.colors['bg'])
-        self.game_info.pack(pady=6)
+        self.info_frame = tk.Frame(left, bg=self.colors['bg'])
+        self.register_widget(self.info_frame, 'bg')
+        self.info_frame.pack(fill=tk.X, pady=(12, 0))
 
-        # Évaluation (texte)
-        self.eval_label = tk.Label(left, text="= 0.00", fg=self.colors['fg'], bg=self.colors['bg'],
+        self.game_info = tk.Label(self.info_frame,
+                                  text="Nouvelle partie",
+                                  font=("Arial", 12),
+                                  fg=self.colors['fg'],
+                                  bg=self.colors['bg'])
+        self.register_widget(self.game_info, 'bg', include_fg=True)
+        self.game_info.pack(anchor='w')
+
+        self.eval_label = tk.Label(self.info_frame,
+                                   text="= 0.00",
+                                   fg=self.colors['fg'],
+                                   bg=self.colors['bg'],
                                    font=("Arial", 12, "bold"))
-        self.eval_label.pack(pady=(0, 6))
+        self.register_widget(self.eval_label, 'bg', include_fg=True)
+        self.eval_label.pack(anchor='w', pady=(4, 0))
 
-        # Historique
-        hist_frame = tk.LabelFrame(left, text="📜 Historique", fg=self.colors['fg'],
-                                   bg=self.colors['panel'], font=("Arial", 11, "bold"))
-        hist_frame.pack(fill=tk.BOTH, expand=False, pady=8)
-        self.history_frame = hist_frame
-        self.moves_text = scrolledtext.ScrolledText(hist_frame, height=6,
-                                                    bg=self.colors['bg'], fg=self.colors['fg'],
-                                                    font=("Consolas", 10), state=tk.DISABLED)
-        self.moves_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        self.actions_frame = tk.Frame(left, bg=self.colors['bg'])
+        self.register_widget(self.actions_frame, 'bg')
+        self.actions_frame.pack(fill=tk.X, pady=(12, 0))
+        self.actions_frame.columnconfigure((0, 1), weight=1)
 
-        # Droite
-        right = tk.Frame(main, bg=self.colors['panel'], width=430)
-        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        self.start_btn = tk.Button(self.actions_frame,
+                                   text="🎯 Nouvelle partie",
+                                   command=self.start_new_game,
+                                   bg='#4CAF50',
+                                   fg='white',
+                                   font=("Arial", 10, "bold"),
+                                   relief=tk.FLAT,
+                                   padx=8,
+                                   pady=6)
+        self.start_btn.grid(row=0, column=0, columnspan=2, sticky="ew", padx=4, pady=2)
+
+        self.hint_btn = tk.Button(self.actions_frame,
+                                  text="💡 Indice",
+                                  command=self.show_hint,
+                                  bg='#2196F3',
+                                  fg='white',
+                                  font=("Arial", 10, "bold"),
+                                  relief=tk.FLAT,
+                                  padx=8,
+                                  pady=6)
+        self.hint_btn.grid(row=1, column=0, sticky="ew", padx=4, pady=2)
+
+        self.clear_hint_btn = tk.Button(self.actions_frame,
+                                        text="🧽 Effacer",
+                                        command=self.clear_hint,
+                                        bg='#607D8B',
+                                        fg='white',
+                                        font=("Arial", 10, "bold"),
+                                        relief=tk.FLAT,
+                                        padx=8,
+                                        pady=6)
+        self.clear_hint_btn.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
+
+        self.resign_btn = tk.Button(self.actions_frame,
+                                    text="🏳️ Abandonner",
+                                    command=self.resign_game,
+                                    bg='#f44336',
+                                    fg='white',
+                                    font=("Arial", 10, "bold"),
+                                    relief=tk.FLAT,
+                                    padx=8,
+                                    pady=6)
+        self.resign_btn.grid(row=2, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 2))
+
+        self.secondary_actions_frame = tk.Frame(left, bg=self.colors['bg'])
+        self.register_widget(self.secondary_actions_frame, 'bg')
+        self.secondary_actions_frame.pack(fill=tk.X, pady=(4, 0))
+        self.secondary_actions_frame.columnconfigure((0, 1), weight=1)
+
+        undo_btn = tk.Button(self.secondary_actions_frame,
+                             text="↩️ Annuler",
+                             command=self.undo_move,
+                             relief=tk.FLAT,
+                             bg=self.colors['panel'],
+                             fg=self.colors['fg'],
+                             padx=6,
+                             pady=6)
+        self.register_widget(undo_btn, 'panel', include_fg=True)
+        undo_btn.grid(row=0, column=0, sticky="ew", padx=4, pady=2)
+
+        redo_btn = tk.Button(self.secondary_actions_frame,
+                             text="↪️ Refaire",
+                             command=self.redo_move,
+                             relief=tk.FLAT,
+                             bg=self.colors['panel'],
+                             fg=self.colors['fg'],
+                             padx=6,
+                             pady=6)
+        self.register_widget(redo_btn, 'panel', include_fg=True)
+        redo_btn.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
+
+        self.history_frame = tk.LabelFrame(left,
+                                           text="📜 Historique de la partie",
+                                           fg=self.colors['fg'],
+                                           bg=self.colors['panel'],
+                                           font=("Arial", 11, "bold"))
+        self.register_widget(self.history_frame, 'panel', include_fg=True)
+        self.history_frame.pack(fill=tk.BOTH, expand=False, pady=(12, 0))
+
+        self.moves_text = scrolledtext.ScrolledText(self.history_frame,
+                                                    height=6,
+                                                    bg=self.colors['panel'],
+                                                    fg=self.colors['fg'],
+                                                    font=("Consolas", 10),
+                                                    state=tk.DISABLED)
+        self.register_widget(self.moves_text, 'panel', include_fg=True)
+        self.moves_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        self.history_actions = tk.Frame(self.history_frame, bg=self.colors['panel'])
+        self.register_widget(self.history_actions, 'panel')
+        self.history_actions.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self.history_actions.columnconfigure((0, 1, 2), weight=1)
+
+        self.import_pgn_btn = tk.Button(self.history_actions,
+                                        text="📥 Importer PGN",
+                                        command=self.import_pgn,
+                                        relief=tk.FLAT,
+                                        bg=self.colors['panel'],
+                                        fg=self.colors['fg'])
+        self.register_widget(self.import_pgn_btn, 'panel', include_fg=True)
+        self.import_pgn_btn.grid(row=0, column=0, sticky="ew", padx=4)
+
+        self.export_pgn_btn = tk.Button(self.history_actions,
+                                        text="📤 Exporter",
+                                        command=self.export_pgn,
+                                        relief=tk.FLAT,
+                                        bg=self.colors['panel'],
+                                        fg=self.colors['fg'])
+        self.register_widget(self.export_pgn_btn, 'panel', include_fg=True)
+        self.export_pgn_btn.grid(row=0, column=1, sticky="ew", padx=4)
+
+        self.copy_pgn_btn = tk.Button(self.history_actions,
+                                      text="📋 Copier",
+                                      command=self.copy_pgn,
+                                      relief=tk.FLAT,
+                                      bg=self.colors['panel'],
+                                      fg=self.colors['fg'])
+        self.register_widget(self.copy_pgn_btn, 'panel', include_fg=True)
+        self.copy_pgn_btn.grid(row=0, column=2, sticky="ew", padx=4)
+
+        right = tk.Frame(main, bg=self.colors['panel'], width=420)
+        self.register_widget(right, 'panel')
+        right.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(16, 0))
         right.pack_propagate(False)
         self.right_frame = right
 
-        # Contrôles de Jeu (manuel)
-        controls = tk.LabelFrame(right, text="🎮 Contrôles de Jeu",
-                                 fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
-        controls.pack(fill=tk.X, padx=10, pady=10)
+        notebook = ttk.Notebook(right)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        self.sidebar_notebook = notebook
 
-        tk.Label(controls, text="Votre couleur:", fg=self.colors['fg'], bg=self.colors['panel']).pack(anchor='w', padx=5)
-        row = tk.Frame(controls, bg=self.colors['panel']); row.pack(fill=tk.X, padx=5, pady=5)
+        self.game_tab = tk.Frame(notebook, bg=self.colors['panel'])
+        self.register_widget(self.game_tab, 'panel')
+        notebook.add(self.game_tab, text="Partie")
+
+        player_frame = tk.LabelFrame(self.game_tab,
+                                     text="Configuration du joueur",
+                                     fg=self.colors['fg'],
+                                     bg=self.colors['panel'],
+                                     font=("Arial", 11, "bold"))
+        self.register_widget(player_frame, 'panel', include_fg=True)
+        player_frame.pack(fill=tk.X, padx=12, pady=(12, 8))
+
+        player_label = tk.Label(player_frame, text="Votre couleur", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(player_label, 'panel', include_fg=True)
+        player_label.pack(anchor='w', padx=8, pady=(4, 0))
+
+        color_row = tk.Frame(player_frame, bg=self.colors['panel'])
+        self.register_widget(color_row, 'panel')
+        color_row.pack(anchor='w', padx=8, pady=(2, 8))
         self.color_var = tk.StringVar(value="white")
-        tk.Radiobutton(row, text="Blancs", variable=self.color_var, value="white",
-                       fg=self.colors['fg'], bg=self.colors['panel'], selectcolor=self.colors['panel']).pack(side=tk.LEFT)
-        tk.Radiobutton(row, text="Noirs", variable=self.color_var, value="black",
-                       fg=self.colors['fg'], bg=self.colors['panel'], selectcolor=self.colors['panel']).pack(side=tk.LEFT)
+        white_radio = tk.Radiobutton(color_row, text="Blancs", variable=self.color_var, value="white",
+                                     fg=self.colors['fg'], bg=self.colors['panel'], selectcolor=self.colors['panel'])
+        self.register_widget(white_radio, 'panel', include_fg=True)
+        white_radio.pack(side=tk.LEFT, padx=(0, 12))
+        black_radio = tk.Radiobutton(color_row, text="Noirs", variable=self.color_var, value="black",
+                                     fg=self.colors['fg'], bg=self.colors['panel'], selectcolor=self.colors['panel'])
+        self.register_widget(black_radio, 'panel', include_fg=True)
+        black_radio.pack(side=tk.LEFT)
 
-        tk.Label(controls, text="Difficulté (ELO):", fg=self.colors['fg'], bg=self.colors['panel']).pack(anchor='w', padx=5, pady=(10,0))
+        difficulty_label = tk.Label(player_frame, text="Difficulté (ELO)", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(difficulty_label, 'panel', include_fg=True)
+        difficulty_label.pack(anchor='w', padx=8)
         self.difficulty_var = tk.IntVar(value=1500)
-        tk.Scale(controls, from_=800, to=3000, orient=tk.HORIZONTAL,
-                 variable=self.difficulty_var, bg=self.colors['panel'], fg=self.colors['fg'],
-                 highlightbackground=self.colors['panel']).pack(fill=tk.X, padx=5, pady=5)
+        difficulty_scale = tk.Scale(player_frame,
+                                    from_=800,
+                                    to=3000,
+                                    orient=tk.HORIZONTAL,
+                                    variable=self.difficulty_var,
+                                    bg=self.colors['panel'],
+                                    fg=self.colors['fg'],
+                                    highlightbackground=self.colors['panel'],
+                                    troughcolor='#555555' if self.theme_dark else '#d0d0d0')
+        self.register_widget(difficulty_scale, 'panel', include_fg=True)
+        difficulty_scale.pack(fill=tk.X, padx=8, pady=(4, 8))
 
-        btns = tk.Frame(controls, bg=self.colors['panel']); btns.pack(fill=tk.X, padx=5, pady=8)
-        self.start_btn = tk.Button(btns, text="🎯 Nouvelle Partie (Manuelle)", command=self.start_new_game,
-                                   bg='#4CAF50', fg='white', font=("Arial", 10, "bold"))
-        self.start_btn.pack(fill=tk.X, pady=2)
-        self.hint_btn = tk.Button(btns, text="💡 Indice (visuel)", command=self.show_hint,
-                                  bg='#2196F3', fg='white', font=("Arial", 10, "bold"))
-        self.hint_btn.pack(fill=tk.X, pady=2)
-        self.clear_hint_btn = tk.Button(btns, text="🧽 Effacer l’indice", command=self.clear_hint,
-                                        bg='#607D8B', fg='white', font=("Arial", 10, "bold"))
-        self.clear_hint_btn.pack(fill=tk.X, pady=2)
-        self.resign_btn = tk.Button(btns, text="🏳️ Abandonner", command=self.resign_game,
-                                    bg='#f44336', fg='white', font=("Arial", 10, "bold"))
-        self.resign_btn.pack(fill=tk.X, pady=2)
-        ur = tk.Frame(controls, bg=self.colors['panel']); ur.pack(fill=tk.X, padx=5, pady=(0,8))
-        tk.Button(ur, text="↩️ Annuler (Undo)", command=self.undo_move).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        tk.Button(ur, text="↪️ Refaire (Redo)", command=self.redo_move).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        clock_frame = tk.LabelFrame(self.game_tab,
+                                    text="Horloge",
+                                    fg=self.colors['fg'],
+                                    bg=self.colors['panel'],
+                                    font=("Arial", 11, "bold"))
+        self.register_widget(clock_frame, 'panel', include_fg=True)
+        clock_frame.pack(fill=tk.X, padx=12, pady=8)
 
-        # Horloge
-        clock = tk.LabelFrame(right, text="⏱️ Horloge", fg=self.colors['fg'],
-                              bg=self.colors['panel'], font=("Arial", 12, "bold"))
-        clock.pack(fill=tk.X, padx=10, pady=10)
-        self.clock_white_lbl = tk.Label(clock, text="Blancs: 05:00", fg=self.colors['fg'], bg=self.colors['panel'],
-                                        font=("Consolas", 12, "bold")); self.clock_white_lbl.pack(fill=tk.X, padx=6, pady=2)
-        self.clock_black_lbl = tk.Label(clock, text="Noirs:  05:00", fg=self.colors['fg'], bg=self.colors['panel'],
-                                        font=("Consolas", 12, "bold")); self.clock_black_lbl.pack(fill=tk.X, padx=6, pady=2)
-        r = tk.Frame(clock, bg=self.colors['panel']); r.pack(fill=tk.X, padx=6, pady=4)
-        tk.Label(r, text="Minutes:", fg=self.colors['fg'], bg=self.colors['panel']).pack(side=tk.LEFT)
+        self.clock_white_lbl = tk.Label(clock_frame,
+                                        text="Blancs: 05:00",
+                                        fg=self.colors['fg'],
+                                        bg=self.colors['panel'],
+                                        font=("Consolas", 12, "bold"))
+        self.register_widget(self.clock_white_lbl, 'panel', include_fg=True)
+        self.clock_white_lbl.pack(fill=tk.X, padx=8, pady=(8, 2))
+
+        self.clock_black_lbl = tk.Label(clock_frame,
+                                        text="Noirs:  05:00",
+                                        fg=self.colors['fg'],
+                                        bg=self.colors['panel'],
+                                        font=("Consolas", 12, "bold"))
+        self.register_widget(self.clock_black_lbl, 'panel', include_fg=True)
+        self.clock_black_lbl.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        timer_row = tk.Frame(clock_frame, bg=self.colors['panel'])
+        self.register_widget(timer_row, 'panel')
+        timer_row.pack(fill=tk.X, padx=8, pady=(0, 8))
+        minutes_label = tk.Label(timer_row, text="Minutes:", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(minutes_label, 'panel', include_fg=True)
+        minutes_label.pack(side=tk.LEFT)
         self.time_minutes_var = tk.IntVar(value=5)
-        tk.Spinbox(r, from_=1, to=180, textvariable=self.time_minutes_var, width=5).pack(side=tk.LEFT, padx=6)
-        tk.Label(r, text="Incr (s):", fg=self.colors['fg'], bg=self.colors['panel']).pack(side=tk.LEFT, padx=(12,0))
+        minutes_spin = tk.Spinbox(timer_row, from_=1, to=180, textvariable=self.time_minutes_var, width=5,
+                                  bg=self.colors['panel'], fg=self.colors['fg'])
+        self.register_widget(minutes_spin, 'panel', include_fg=True)
+        minutes_spin.pack(side=tk.LEFT, padx=6)
+        increment_label = tk.Label(timer_row, text="Incr (s):", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(increment_label, 'panel', include_fg=True)
+        increment_label.pack(side=tk.LEFT, padx=(12, 0))
         self.increment_var = tk.IntVar(value=0)
-        tk.Spinbox(r, from_=0, to=60, textvariable=self.increment_var, width=5).pack(side=tk.LEFT, padx=6)
+        increment_spin = tk.Spinbox(timer_row, from_=0, to=60, textvariable=self.increment_var, width=5,
+                                    bg=self.colors['panel'], fg=self.colors['fg'])
+        self.register_widget(increment_spin, 'panel', include_fg=True)
+        increment_spin.pack(side=tk.LEFT, padx=6)
 
-        # Statistiques
-        stats = tk.LabelFrame(right, text="📊 Statistiques",
-                              fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
-        stats.pack(fill=tk.X, padx=10, pady=10)
-        self.stats_text = tk.Text(stats, height=7, bg=self.colors['bg'], fg=self.colors['fg'],
-                                  font=("Arial", 10), state=tk.DISABLED)
-        self.stats_text.pack(fill=tk.X, padx=5, pady=5)
+        self.analysis_tab = tk.Frame(notebook, bg=self.colors['panel'])
+        self.register_widget(self.analysis_tab, 'panel')
+        notebook.add(self.analysis_tab, text="Analyse")
 
-        # Analyse
-        an = tk.LabelFrame(right, text="🔍 Analyse",
-                           fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
-        an.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.analysis_text = scrolledtext.ScrolledText(an, height=10, bg=self.colors['bg'], fg=self.colors['fg'],
-                                                       font=("Consolas", 9), state=tk.DISABLED)
-        self.analysis_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        ab = tk.Frame(an, bg=self.colors['panel']); ab.pack(fill=tk.X, padx=5, pady=5)
-        tk.Button(ab, text="📈 Analyser Position", command=self.analyze_position,
-                  bg=self.colors['accent'], fg='white', font=("Arial", 9, "bold")).pack(side=tk.LEFT, padx=2)
-        tk.Button(ab, text="🧹 Effacer", command=self.clear_analysis,
-                  bg='#607D8B', fg='white', font=("Arial", 9, "bold")).pack(side=tk.RIGHT, padx=2)
+        analysis_header = tk.Frame(self.analysis_tab, bg=self.colors['panel'])
+        self.register_widget(analysis_header, 'panel')
+        analysis_header.pack(fill=tk.X, padx=12, pady=(12, 0))
+        depth_label = tk.Label(analysis_header, text="Profondeur d'analyse", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(depth_label, 'panel', include_fg=True)
+        depth_label.pack(anchor='w')
+        self.depth_var = tk.IntVar(value=self.analysis_depth)
+        depth_scale = tk.Scale(self.analysis_tab,
+                               from_=8,
+                               to=30,
+                               orient=tk.HORIZONTAL,
+                               variable=self.depth_var,
+                               bg=self.colors['panel'],
+                               fg=self.colors['fg'],
+                               highlightbackground=self.colors['panel'],
+                               troughcolor='#555555' if self.theme_dark else '#d0d0d0',
+                               command=lambda _: self.on_depth_change())
+        self.register_widget(depth_scale, 'panel', include_fg=True)
+        depth_scale.pack(fill=tk.X, padx=12, pady=(6, 12))
 
-        # ⚙️ Options moteur
-        opt = tk.LabelFrame(right, text="⚙️ Options moteur",
-                            fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
-        opt.pack(fill=tk.X, padx=10, pady=10)
-        r1 = tk.Frame(opt, bg=self.colors['panel']); r1.pack(fill=tk.X, padx=6, pady=2)
-        tk.Label(r1, text="Threads", fg=self.colors['fg'], bg=self.colors['panel']).pack(side=tk.LEFT)
+        self.analysis_text = scrolledtext.ScrolledText(self.analysis_tab,
+                                                       height=12,
+                                                       bg=self.colors['panel'],
+                                                       fg=self.colors['fg'],
+                                                       font=("Consolas", 9),
+                                                       state=tk.DISABLED)
+        self.register_widget(self.analysis_text, 'panel', include_fg=True)
+        self.analysis_text.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+
+        analysis_buttons = tk.Frame(self.analysis_tab, bg=self.colors['panel'])
+        self.register_widget(analysis_buttons, 'panel')
+        analysis_buttons.pack(fill=tk.X, padx=12, pady=(0, 12))
+        analysis_buttons.columnconfigure((0, 1), weight=1)
+
+        analyze_btn = tk.Button(analysis_buttons,
+                                text="📈 Analyser la position",
+                                command=self.analyze_position,
+                                bg=self.colors['accent'],
+                                fg='white',
+                                font=("Arial", 10, "bold"),
+                                relief=tk.FLAT,
+                                padx=6,
+                                pady=6)
+        analyze_btn.grid(row=0, column=0, sticky="ew", padx=4)
+
+        clear_btn = tk.Button(analysis_buttons,
+                              text="🧹 Effacer",
+                              command=self.clear_analysis,
+                              bg='#607D8B',
+                              fg='white',
+                              font=("Arial", 10, "bold"),
+                              relief=tk.FLAT,
+                              padx=6,
+                              pady=6)
+        clear_btn.grid(row=0, column=1, sticky="ew", padx=4)
+
+        self.engine_tab = tk.Frame(notebook, bg=self.colors['panel'])
+        self.register_widget(self.engine_tab, 'panel')
+        notebook.add(self.engine_tab, text="Moteur")
+
+        engine_options = tk.LabelFrame(self.engine_tab,
+                                       text="Paramètres Stockfish",
+                                       fg=self.colors['fg'],
+                                       bg=self.colors['panel'],
+                                       font=("Arial", 11, "bold"))
+        self.register_widget(engine_options, 'panel', include_fg=True)
+        engine_options.pack(fill=tk.X, padx=12, pady=(12, 8))
+
+        threads_row = tk.Frame(engine_options, bg=self.colors['panel'])
+        self.register_widget(threads_row, 'panel')
+        threads_row.pack(fill=tk.X, padx=8, pady=4)
+        threads_label = tk.Label(threads_row, text="Threads", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(threads_label, 'panel', include_fg=True)
+        threads_label.pack(side=tk.LEFT)
         self.threads_var = tk.IntVar(value=2)
-        tk.Spinbox(r1, from_=1, to=16, textvariable=self.threads_var, width=5, command=self.apply_engine_options).pack(side=tk.LEFT, padx=6)
-        tk.Label(r1, text="Hash(MB)", fg=self.colors['fg'], bg=self.colors['panel']).pack(side=tk.LEFT, padx=(12,0))
+        threads_spin = tk.Spinbox(threads_row, from_=1, to=16, textvariable=self.threads_var, width=5,
+                                  command=self.apply_engine_options,
+                                  bg=self.colors['panel'], fg=self.colors['fg'])
+        self.register_widget(threads_spin, 'panel', include_fg=True)
+        threads_spin.pack(side=tk.LEFT, padx=6)
+
+        hash_label = tk.Label(threads_row, text="Hash (MB)", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(hash_label, 'panel', include_fg=True)
+        hash_label.pack(side=tk.LEFT, padx=(12, 0))
         self.hash_var = tk.IntVar(value=128)
-        tk.Spinbox(r1, from_=16, to=4096, textvariable=self.hash_var, width=6, command=self.apply_engine_options).pack(side=tk.LEFT, padx=6)
+        hash_spin = tk.Spinbox(threads_row, from_=16, to=4096, textvariable=self.hash_var, width=6,
+                               command=self.apply_engine_options,
+                               bg=self.colors['panel'], fg=self.colors['fg'])
+        self.register_widget(hash_spin, 'panel', include_fg=True)
+        hash_spin.pack(side=tk.LEFT, padx=6)
 
-        r2 = tk.Frame(opt, bg=self.colors['panel']); r2.pack(fill=tk.X, padx=6, pady=2)
-        tk.Label(r2, text="Skill(0-20)", fg=self.colors['fg'], bg=self.colors['panel']).pack(side=tk.LEFT)
+        skill_row = tk.Frame(engine_options, bg=self.colors['panel'])
+        self.register_widget(skill_row, 'panel')
+        skill_row.pack(fill=tk.X, padx=8, pady=4)
+        skill_label = tk.Label(skill_row, text="Skill (0-20)", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(skill_label, 'panel', include_fg=True)
+        skill_label.pack(side=tk.LEFT)
         self.skill_var = tk.IntVar(value=20)
-        tk.Spinbox(r2, from_=0, to=20, textvariable=self.skill_var, width=5, command=self.apply_engine_options).pack(side=tk.LEFT, padx=6)
-        tk.Button(r2, text="🎨 Thème clair/sombre", command=self.toggle_theme).pack(side=tk.RIGHT)
+        skill_spin = tk.Spinbox(skill_row, from_=0, to=20, textvariable=self.skill_var, width=5,
+                                command=self.apply_engine_options,
+                                bg=self.colors['panel'], fg=self.colors['fg'])
+        self.register_widget(skill_spin, 'panel', include_fg=True)
+        skill_spin.pack(side=tk.LEFT, padx=6)
 
-        r3 = tk.Frame(opt, bg=self.colors['panel']); r3.pack(fill=tk.X, padx=6, pady=2)
+        appearance_row = tk.Frame(engine_options, bg=self.colors['panel'])
+        self.register_widget(appearance_row, 'panel')
+        appearance_row.pack(fill=tk.X, padx=8, pady=6)
         self.flip_var = tk.BooleanVar(value=self.flip_board)
-        tk.Checkbutton(r3, text="Inverser l'échiquier", var=self.flip_var, command=self.toggle_flip,
-                       fg=self.colors['fg'], bg=self.colors['panel'], selectcolor=self.colors['panel']).pack(side=tk.LEFT)
-        tk.Button(r3, text="📁 Choisir Stockfish", command=self.choose_stockfish).pack(side=tk.RIGHT)
+        flip_check = tk.Checkbutton(appearance_row,
+                                    text="Inverser l'échiquier",
+                                    var=self.flip_var,
+                                    command=self.toggle_flip,
+                                    fg=self.colors['fg'],
+                                    bg=self.colors['panel'],
+                                    selectcolor=self.colors['panel'])
+        self.register_widget(flip_check, 'panel', include_fg=True)
+        flip_check.pack(side=tk.LEFT)
 
-        r4 = tk.Frame(opt, bg=self.colors['panel'])
-        r4.pack(fill=tk.X, padx=6, pady=4)
-        self.toggle_reduced_btn = tk.Button(r4, text="🗖 Plateau seul", command=self.toggle_reduced_mode)
-        self.toggle_reduced_btn.pack(fill=tk.X)
-        self.toggle_overlay_btn = tk.Button(r4, text="🪄 Mode Overlay Transparent", command=self.toggle_overlay_mode)
-        self.toggle_overlay_btn.pack(fill=tk.X, pady=(6, 0))
+        theme_btn = tk.Button(appearance_row,
+                              text="🎨 Thème clair/sombre",
+                              command=self.toggle_theme,
+                              bg=self.colors['panel'],
+                              fg=self.colors['fg'],
+                              relief=tk.FLAT,
+                              padx=6,
+                              pady=6)
+        self.register_widget(theme_btn, 'panel', include_fg=True)
+        theme_btn.pack(side=tk.RIGHT)
 
-        # 🤖 Mode Auto (SFSF) — panneau et boutons
-        auto = tk.LabelFrame(right, text="🤖 Mode Auto: Stockfish vs Stockfish",
-                             fg=self.colors['fg'], bg=self.colors['panel'], font=("Arial", 12, "bold"))
-        auto.pack(fill=tk.X, padx=10, pady=10)
+        engine_buttons = tk.Frame(self.engine_tab, bg=self.colors['panel'])
+        self.register_widget(engine_buttons, 'panel')
+        engine_buttons.pack(fill=tk.X, padx=12, pady=(0, 8))
+        engine_buttons.columnconfigure((0, 1), weight=1)
 
-        rowa = tk.Frame(auto, bg=self.colors['panel']); rowa.pack(fill=tk.X, padx=6, pady=2)
-        tk.Label(rowa, text="ELO Blancs:", fg=self.colors['fg'], bg=self.colors['panel']).pack(side=tk.LEFT)
+        choose_btn = tk.Button(engine_buttons,
+                               text="📁 Choisir Stockfish",
+                               command=self.choose_stockfish,
+                               bg=self.colors['panel'],
+                               fg=self.colors['fg'],
+                               relief=tk.FLAT,
+                               padx=6,
+                               pady=6)
+        self.register_widget(choose_btn, 'panel', include_fg=True)
+        choose_btn.grid(row=0, column=0, sticky="ew", padx=4)
+
+        self.toggle_reduced_btn = tk.Button(engine_buttons,
+                                            text="🗖 Plateau seul",
+                                            command=self.toggle_reduced_mode,
+                                            bg=self.colors['panel'],
+                                            fg=self.colors['fg'],
+                                            relief=tk.FLAT,
+                                            padx=6,
+                                            pady=6)
+        self.register_widget(self.toggle_reduced_btn, 'panel', include_fg=True)
+        self.toggle_reduced_btn.grid(row=0, column=1, sticky="ew", padx=4)
+
+        overlay_btn_row = tk.Frame(self.engine_tab, bg=self.colors['panel'])
+        self.register_widget(overlay_btn_row, 'panel')
+        overlay_btn_row.pack(fill=tk.X, padx=12, pady=(0, 12))
+        self.toggle_overlay_btn = tk.Button(overlay_btn_row,
+                                            text="🪄 Mode overlay transparent",
+                                            command=self.toggle_overlay_mode,
+                                            bg=self.colors['panel'],
+                                            fg=self.colors['fg'],
+                                            relief=tk.FLAT,
+                                            padx=6,
+                                            pady=6)
+        self.register_widget(self.toggle_overlay_btn, 'panel', include_fg=True)
+        self.toggle_overlay_btn.pack(fill=tk.X)
+
+        self.auto_tab = tk.Frame(notebook, bg=self.colors['panel'])
+        self.register_widget(self.auto_tab, 'panel')
+        notebook.add(self.auto_tab, text="Mode auto")
+
+        auto_frame = tk.LabelFrame(self.auto_tab,
+                                   text="Stockfish vs Stockfish",
+                                   fg=self.colors['fg'],
+                                   bg=self.colors['panel'],
+                                   font=("Arial", 11, "bold"))
+        self.register_widget(auto_frame, 'panel', include_fg=True)
+        auto_frame.pack(fill=tk.X, padx=12, pady=(12, 8))
+
+        auto_row = tk.Frame(auto_frame, bg=self.colors['panel'])
+        self.register_widget(auto_row, 'panel')
+        auto_row.pack(fill=tk.X, padx=8, pady=4)
+        auto_white_label = tk.Label(auto_row, text="ELO Blancs:", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(auto_white_label, 'panel', include_fg=True)
+        auto_white_label.pack(side=tk.LEFT)
         self.auto_white_elo_var = tk.IntVar(value=self.auto_white_elo)
-        tk.Spinbox(rowa, from_=800, to=3000, textvariable=self.auto_white_elo_var, width=6).pack(side=tk.LEFT, padx=6)
+        auto_white_spin = tk.Spinbox(auto_row, from_=800, to=3000, textvariable=self.auto_white_elo_var, width=6,
+                                     bg=self.colors['panel'], fg=self.colors['fg'])
+        self.register_widget(auto_white_spin, 'panel', include_fg=True)
+        auto_white_spin.pack(side=tk.LEFT, padx=6)
 
-        tk.Label(rowa, text="ELO Noirs:", fg=self.colors['fg'], bg=self.colors['panel']).pack(side=tk.LEFT, padx=(12,0))
+        auto_black_label = tk.Label(auto_row, text="ELO Noirs:", fg=self.colors['fg'], bg=self.colors['panel'])
+        self.register_widget(auto_black_label, 'panel', include_fg=True)
+        auto_black_label.pack(side=tk.LEFT, padx=(12, 0))
         self.auto_black_elo_var = tk.IntVar(value=self.auto_black_elo)
-        tk.Spinbox(rowa, from_=800, to=3000, textvariable=self.auto_black_elo_var, width=6).pack(side=tk.LEFT, padx=6)
+        auto_black_spin = tk.Spinbox(auto_row, from_=800, to=3000, textvariable=self.auto_black_elo_var, width=6,
+                                     bg=self.colors['panel'], fg=self.colors['fg'])
+        self.register_widget(auto_black_spin, 'panel', include_fg=True)
+        auto_black_spin.pack(side=tk.LEFT, padx=6)
 
-        rowb = tk.Frame(auto, bg=self.colors['panel']); rowb.pack(fill=tk.X, padx=6, pady=2)
-        tk.Button(rowb, text="🚀 Lancer Partie Auto (SFSF)", command=self.start_auto_game,
-                  bg='#8E24AA', fg='white', font=("Arial", 10, "bold")).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
-        tk.Button(rowb, text="⏹️ Arrêter Auto", command=self.stop_auto_game,
-                  bg='#B71C1C', fg='white', font=("Arial", 10, "bold")).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
+        auto_buttons = tk.Frame(self.auto_tab, bg=self.colors['panel'])
+        self.register_widget(auto_buttons, 'panel')
+        auto_buttons.pack(fill=tk.X, padx=12, pady=(0, 12))
+        auto_buttons.columnconfigure((0, 1), weight=1)
 
-        # Raccourcis clavier utiles
+        start_auto_btn = tk.Button(auto_buttons,
+                                   text="🚀 Lancer",
+                                   command=self.start_auto_game,
+                                   bg='#8E24AA',
+                                   fg='white',
+                                   font=("Arial", 10, "bold"),
+                                   relief=tk.FLAT,
+                                   padx=6,
+                                   pady=6)
+        start_auto_btn.grid(row=0, column=0, sticky="ew", padx=4)
+
+        stop_auto_btn = tk.Button(auto_buttons,
+                                  text="⏹️ Arrêter",
+                                  command=self.stop_auto_game,
+                                  bg='#B71C1C',
+                                  fg='white',
+                                  font=("Arial", 10, "bold"),
+                                  relief=tk.FLAT,
+                                  padx=6,
+                                  pady=6)
+        stop_auto_btn.grid(row=0, column=1, sticky="ew", padx=4)
+
+        self.stats_tab = tk.Frame(notebook, bg=self.colors['panel'])
+        self.register_widget(self.stats_tab, 'panel')
+        notebook.add(self.stats_tab, text="Statistiques")
+
+        stats_frame = tk.LabelFrame(self.stats_tab,
+                                    text="Bilan des parties",
+                                    fg=self.colors['fg'],
+                                    bg=self.colors['panel'],
+                                    font=("Arial", 11, "bold"))
+        self.register_widget(stats_frame, 'panel', include_fg=True)
+        stats_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        self.stats_text = tk.Text(stats_frame,
+                                  height=10,
+                                  bg=self.colors['panel'],
+                                  fg=self.colors['fg'],
+                                  font=("Arial", 10),
+                                  state=tk.DISABLED)
+        self.register_widget(self.stats_text, 'panel', include_fg=True)
+        self.stats_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        self.apply_theme_to_widgets()
+
         self.master.bind("<Key-h>", lambda e: self.show_hint())
         self.master.bind("<Key-H>", lambda e: self.show_hint())
         self.master.bind("<Key-c>", lambda e: self.clear_hint())
@@ -324,7 +765,6 @@ class ChessGUI:
         self.master.bind("<Key-o>", lambda e: self.toggle_overlay_mode())
         self.master.bind("<Key-O>", lambda e: self.toggle_overlay_mode())
         self.master.bind("<Escape>", self.on_escape)
-
     # ---------- Coordonnées & mapping ----------
     def get_board_padding(self):
         return 0 if self.overlay_mode else self.PADDING
@@ -983,9 +1423,9 @@ Nuls: {s['draws']}"""
     def toggle_theme(self):
         self.theme_dark = not self.theme_dark
         self.colors = self.get_colors(self.theme_dark)
+        self.configure_ttk_styles()
         self.master.configure(bg=self.colors['bg'])
-        for w in self.master.winfo_children():
-            self._recolor_recursive(w)
+        self.apply_theme_to_widgets()
         if self.overlay_mode:
             self.apply_overlay_transparency()
         self.update_board_display()
@@ -1094,15 +1534,17 @@ Nuls: {s['draws']}"""
             if self.overlay_transparency_supported is None:
                 self.add_analysis("⚠️ Transparence native indisponible sur cette plateforme.")
             self.overlay_transparency_supported = False
-        for widget in (self.master, self.main_frame, self.left_frame, self.canvas):
+        for widget in (self.master, self.main_frame, self.left_frame, self.board_frame, self.canvas):
             try:
                 widget.configure(bg=color)
             except Exception:
                 pass
-        try:
-            self.right_frame.configure(bg=color)
-        except Exception:
-            pass
+        for widget in (self.header_frame, self.info_frame, self.actions_frame,
+                       self.secondary_actions_frame, self.history_frame, self.right_frame):
+            try:
+                widget.configure(bg=color)
+            except Exception:
+                pass
 
     def remove_overlay_transparency(self):
         try:
@@ -1110,21 +1552,7 @@ Nuls: {s['draws']}"""
         except tk.TclError:
             pass
         self.master.configure(bg=self.colors['bg'])
-        try:
-            self.main_frame.configure(bg=self.colors['bg'])
-        except Exception:
-            pass
-        try:
-            self.left_frame.configure(bg=self.colors['bg'])
-        except Exception:
-            pass
-        try:
-            self.right_frame.configure(bg=self.colors['panel'])
-        except Exception:
-            pass
-        self.canvas.configure(bg=self.colors['bg'])
-        for w in self.master.winfo_children():
-            self._recolor_recursive(w)
+        self.apply_theme_to_widgets()
 
     def on_escape(self, event=None):
         if self.overlay_mode:
@@ -1138,17 +1566,20 @@ Nuls: {s['draws']}"""
         self.normal_geometry = self.master.geometry()
         self.reduced_mode = True
 
-        # Masquer tout sauf le plateau
-        self.title_label.pack_forget()
-        self.status_label.pack_forget()
-        self.game_info.pack_forget()
-        self.eval_label.pack_forget()
-        self.history_frame.pack_forget()
-        self.right_frame.pack_forget()
+        for widget in (
+            self.header_frame,
+            self.info_frame,
+            self.actions_frame,
+            self.secondary_actions_frame,
+            self.history_frame,
+            self.right_frame,
+        ):
+            try:
+                widget.pack_forget()
+            except Exception:
+                pass
 
-        # Réorganiser le canevas et les conteneurs
-        self.canvas.pack_forget()
-        self.canvas.pack(pady=0)
+        self.board_frame.pack_configure(pady=0)
         self.main_frame.pack_configure(fill=tk.NONE, expand=False, padx=0, pady=0)
         self.left_frame.pack_configure(fill=tk.NONE, expand=False)
 
@@ -1163,41 +1594,26 @@ Nuls: {s['draws']}"""
             return
         self.reduced_mode = False
 
-        # Restaurer la disposition complète
-        self.main_frame.pack_configure(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.main_frame.pack_configure(fill=tk.BOTH, expand=True, padx=16, pady=16)
         self.left_frame.pack_configure(fill=tk.BOTH, expand=True)
 
-        self.canvas.pack_forget()
-        self.title_label.pack(pady=(0, 8))
-        self.status_label.pack()
-        self.canvas.pack(pady=10)
-        self.game_info.pack(pady=6)
-        self.eval_label.pack(pady=(0, 6))
-        self.history_frame.pack(fill=tk.BOTH, expand=False, pady=8)
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        self.board_frame.pack_forget()
+        self.header_frame.pack(fill=tk.X)
+        self.board_frame.pack(pady=(12, 0))
+        self.info_frame.pack(fill=tk.X, pady=(12, 0))
+        self.actions_frame.pack(fill=tk.X, pady=(12, 0))
+        self.secondary_actions_frame.pack(fill=tk.X, pady=(4, 0))
+        self.history_frame.pack(fill=tk.BOTH, expand=False, pady=(12, 0))
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(16, 0))
 
         if self.normal_geometry:
             self.master.geometry(self.normal_geometry)
         self.toggle_reduced_btn.config(text="🗖 Plateau seul")
+        self.apply_theme_to_widgets()
 
     def _recolor_recursive(self, widget):
-        try:
-            if isinstance(widget, (tk.Frame, tk.LabelFrame)):
-                widget.configure(bg=self.colors['panel'] if widget != self.master.children.get('!frame', None) else self.colors['bg'])
-        except Exception:
-            pass
-        for child in widget.winfo_children():
-            if isinstance(child, tk.Label):
-                try: child.configure(bg=self.colors['bg'] if child.master == self.master.children.get('!frame', None) else self.colors['panel'],
-                                     fg=self.colors['fg'])
-                except: pass
-            elif isinstance(child, (tk.Text, scrolledtext.ScrolledText)):
-                try: child.configure(bg=self.colors['bg'], fg=self.colors['fg'])
-                except: pass
-            elif isinstance(child, tk.Canvas):
-                try: child.configure(bg=self.colors['bg'])
-                except: pass
-            self._recolor_recursive(child)
+        """Compatibilité : applique la palette actuelle aux widgets."""
+        self.apply_theme_to_widgets()
 
     def choose_stockfish(self):
         p = filedialog.askopenfilename(title="Sélectionner Stockfish",
