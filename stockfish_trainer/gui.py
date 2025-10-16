@@ -1,8 +1,11 @@
 """Tkinter-based graphical user interface for the Stockfish trainer."""
 
+from __future__ import annotations
+
 import json
 import os
 import queue
+import random
 import threading
 from datetime import datetime
 from io import BytesIO
@@ -17,6 +20,35 @@ import cairosvg
 
 from .engine import SafeStockfish
 from .utils import clamp
+
+
+class VariationNode:
+    """Simple tree structure to represent opening variations."""
+
+    __slots__ = ("move", "children")
+
+    def __init__(self, move: chess.Move | None = None) -> None:
+        self.move = move
+        self.children: dict[str, "VariationNode"] = {}
+
+    def add_line(self, san_moves: list[str]) -> None:
+        board = chess.Board()
+        current = self
+        for san in san_moves:
+            try:
+                move = board.parse_san(san)
+            except ValueError as exc:
+                raise ValueError(f"coup SAN invalide '{san}'") from exc
+            uci = move.uci()
+            if uci not in current.children:
+                current.children[uci] = VariationNode(move)
+            current = current.children[uci]
+            board.push(move)
+
+    def max_depth(self) -> int:
+        if not self.children:
+            return 0
+        return 1 + max(child.max_depth() for child in self.children.values())
 
 class ChessGUI:
     BOARD_SIZE = 640
@@ -84,8 +116,11 @@ class ChessGUI:
         self.training_description_var = tk.StringVar(value="Mode libre sans séquence imposée.")
         self.training_status_var = tk.StringVar(value="Mode libre")
         self.training_lines = self.load_default_openings()
-        self.training_line = []
-        self.training_index = 0
+        self.training_tree: VariationNode | None = None
+        self.training_possible_nodes: list[VariationNode] = []
+        self.training_moves_played = 0
+        self.training_total_depth = 0
+        self.training_total_variations = 0
         self.training_active = False
 
         # UI
@@ -807,47 +842,143 @@ class ChessGUI:
     def load_default_openings(self):
         return {
             "Libre": {
-                "moves": [],
+                "lines": [],
                 "description": "Mode libre sans séquence imposée.",
                 "recommended_color": None,
             },
             "Défense Caro-Kann (Classique)": {
-                "moves": [
-                    "e4", "c6", "d4", "d5", "Nc3", "dxe4", "Nxe4", "Bf5",
-                    "Ng3", "Bg6", "h4", "h6",
+                "lines": [
+                    [
+                        "e4", "c6", "d4", "d5", "Nc3", "dxe4", "Nxe4", "Bf5",
+                        "Ng3", "Bg6", "h4", "h6",
+                    ],
+                    [
+                        "e4", "c6", "d4", "d5", "Nc3", "dxe4", "Nxe4", "Nd7",
+                        "Nf3", "Ngf6", "Ng3", "e6", "Bd3", "c5",
+                    ],
                 ],
-                "description": "1.e4 c6 2.d4 d5 3.Nc3 dxe4 4.Nxe4 Bf5 5.Ng3 Bg6 6.h4 h6",
+                "description": "Variante classique avec options ...Bf5 et ...Nd7.",
                 "recommended_color": "noirs",
             },
             "Défense Sicilienne (Najdorf)": {
-                "moves": [
-                    "e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6",
+                "lines": [
+                    [
+                        "e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6",
+                    ],
+                    [
+                        "e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "g6", "Be3", "Bg7",
+                    ],
+                    [
+                        "e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "e6", "Be2", "Be7",
+                    ],
                 ],
-                "description": "1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 a6",
+                "description": "Plans Najdorf, Dragon et Scheveningen contre 1.e4.",
                 "recommended_color": "noirs",
             },
             "Défense Française (Classique)": {
-                "moves": [
-                    "e4", "e6", "d4", "d5", "Nc3", "Nf6", "Bg5", "Be7",
+                "lines": [
+                    [
+                        "e4", "e6", "d4", "d5", "Nc3", "Nf6", "Bg5", "Be7",
+                    ],
+                    [
+                        "e4", "e6", "d4", "d5", "Nc3", "Bb4", "e5", "c5",
+                    ],
+                    [
+                        "e4", "e6", "d4", "d5", "Nc3", "dxe4", "Nxe4", "Nd7", "Nf3", "Ngf6",
+                    ],
                 ],
-                "description": "1.e4 e6 2.d4 d5 3.Nc3 Nf6 4.Bg5 Be7",
+                "description": "Classique, Winawer et variantes Rubinstein dans la Française.",
                 "recommended_color": "noirs",
             },
             "Ouverture Espagnole (Défense Morphy)": {
-                "moves": [
-                    "e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O", "Be7",
+                "lines": [
+                    [
+                        "e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O", "Be7",
+                    ],
+                    [
+                        "e4", "e5", "Nf3", "Nc6", "Bb5", "Nf6", "O-O", "Nxe4", "Re1", "Nd6", "Nxe5",
+                    ],
+                    [
+                        "e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O", "Be7", "Re1", "b5", "Bb3", "d6",
+                    ],
                 ],
-                "description": "1.e4 e5 2.Nf3 Nc6 3.Bb5 a6 4.Ba4 Nf6 5.O-O Be7",
+                "description": "Morphy, Berlin et plan fermé classique pour les Noirs.",
                 "recommended_color": "noirs",
             },
             "Gambit Dame refusé": {
-                "moves": [
-                    "d4", "d5", "c4", "e6", "Nc3", "Nf6", "Bg5", "Be7",
+                "lines": [
+                    [
+                        "d4", "d5", "c4", "e6", "Nc3", "Nf6", "Bg5", "Be7",
+                    ],
+                    [
+                        "d4", "d5", "c4", "e6", "Nc3", "Nf6", "Nf3", "Be7", "Bg5", "h6", "Bh4", "O-O",
+                    ],
+                    [
+                        "d4", "d5", "c4", "e6", "Nc3", "c5", "cxd5", "exd5", "Nf3", "Nc6",
+                    ],
                 ],
-                "description": "1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Bg5 Be7",
+                "description": "Structures orthodoxes, Lasker et Tarrasch contre le gambit dame.",
                 "recommended_color": "noirs",
             },
         }
+
+    def get_opening_lines(self, data: dict) -> list[list[str]]:
+        raw_lines = data.get("lines")
+        if raw_lines is None:
+            moves = data.get("moves", [])
+            raw_lines = [moves] if moves else []
+        normalized: list[list[str]] = []
+        for entry in raw_lines:
+            if not entry:
+                continue
+            if isinstance(entry, str):
+                normalized.append([entry])
+                continue
+            normalized.append([str(move).strip() for move in entry if str(move).strip()])
+        return normalized
+
+    def build_training_tree(self, san_lines: list[list[str]]) -> VariationNode:
+        root = VariationNode()
+        for san_line in san_lines:
+            root.add_line(san_line)
+        return root
+
+    def count_remaining_variations(self, nodes: list[VariationNode] | None = None) -> int:
+        if nodes is None:
+            nodes = self.training_possible_nodes
+        total = 0
+        for node in nodes:
+            if not node.children:
+                total += 1
+            else:
+                total += self.count_remaining_variations(list(node.children.values()))
+        return total
+
+    def get_training_children(self) -> dict[str, VariationNode]:
+        children: dict[str, VariationNode] = {}
+        for node in self.training_possible_nodes:
+            for uci, child in node.children.items():
+                children[uci] = child
+        return children
+
+    def select_training_response(self, children: dict[str, VariationNode]) -> VariationNode:
+        return random.choice(list(children.values()))
+
+    def advance_training_state(self, move: chess.Move) -> bool:
+        if not self.training_active:
+            return False
+        uci = move.uci()
+        next_nodes = []
+        for node in self.training_possible_nodes:
+            child = node.children.get(uci)
+            if child:
+                next_nodes.append(child)
+        if not next_nodes:
+            return False
+        self.training_possible_nodes = next_nodes
+        self.training_moves_played += 1
+        self.update_training_progress()
+        return True
 
     def on_training_toggle(self):
         if not self.training_mode_var.get():
@@ -861,41 +992,47 @@ class ChessGUI:
         data = self.training_lines.get(name, {})
         description = data.get("description", "Mode libre sans séquence imposée.")
         self.training_description_var.set(description)
-        if (not self.training_mode_var.get()) or not data.get("moves"):
+        lines = self.get_opening_lines(data)
+        if (not self.training_mode_var.get()) or not lines:
             self.training_status_var.set("Mode libre")
             return
+        variants = len(lines)
+        base = "Séquence prête"
+        if variants:
+            base = f"{variants} variante{'s' if variants > 1 else ''} prête{'s' if variants > 1 else ''}"
         recommended = data.get("recommended_color")
         if recommended:
-            self.training_status_var.set(f"Séquence prête (couleur conseillée : {recommended}).")
+            self.training_status_var.set(f"{base} (couleur conseillée : {recommended}).")
         else:
-            self.training_status_var.set("Séquence prête.")
+            self.training_status_var.set(f"{base}.")
 
     def reset_training_state(self):
-        self.training_line = []
-        self.training_index = 0
+        self.training_tree = None
+        self.training_possible_nodes = []
+        self.training_moves_played = 0
+        self.training_total_depth = 0
+        self.training_total_variations = 0
         self.training_active = False
 
     def initialize_training_line(self, name):
         self.reset_training_state()
         data = self.training_lines.get(name, {})
-        moves_san = data.get("moves", [])
-        if not moves_san:
+        san_lines = self.get_opening_lines(data)
+        if not san_lines:
             self.training_status_var.set("Mode libre")
             return False
-        preview_board = chess.Board()
-        parsed_moves = []
         try:
-            for san in moves_san:
-                move = preview_board.parse_san(san)
-                parsed_moves.append(move)
-                preview_board.push(move)
+            tree = self.build_training_tree(san_lines)
         except ValueError as exc:
             self.training_status_var.set("Séquence invalide")
             self.add_analysis(f"❌ Séquence invalide ({name}): {exc}")
             messagebox.showerror("Entraînement ouverture", f"Séquence invalide pour {name}: {exc}")
             return False
-        self.training_line = parsed_moves
-        self.training_index = 0
+        self.training_tree = tree
+        self.training_possible_nodes = [tree]
+        self.training_total_depth = tree.max_depth()
+        self.training_total_variations = self.count_remaining_variations()
+        self.training_moves_played = 0
         self.training_active = True
         self.update_training_progress()
         return True
@@ -903,16 +1040,40 @@ class ChessGUI:
     def update_training_progress(self):
         if not self.training_active:
             return
-        total = len(self.training_line)
-        done = min(self.training_index, total)
-        self.training_status_var.set(f"Progression: {done}/{total} coups")
+        remaining_depth = 0
+        if self.training_possible_nodes:
+            remaining_depth = max(node.max_depth() for node in self.training_possible_nodes)
+        total = self.training_moves_played + remaining_depth
+        self.training_total_depth = total
+        done = self.training_moves_played
+        if total:
+            status = f"Progression: {min(done, total)}/{total} coups"
+        else:
+            status = f"Progression: {done} coups"
+        available = len(self.get_training_children()) if self.training_possible_nodes else 0
+        if available:
+            status += f" • Coups disponibles: {available}"
+        else:
+            status += " • Séquence terminée"
+        if self.training_total_variations:
+            remaining = self.count_remaining_variations()
+            if remaining:
+                status += f" • Variantes restantes: {remaining}/{self.training_total_variations}"
+            else:
+                status += f" • Variantes restantes: 0/{self.training_total_variations}"
+        self.training_status_var.set(status)
 
     def play_training_moves_until_player_turn(self):
         if not self.training_active:
             return
-        while self.training_active and self.training_index < len(self.training_line) and self.board.turn != self.player_color:
-            expected = self.training_line[self.training_index]
-            if expected not in self.board.legal_moves:
+        while self.training_active and self.board.turn != self.player_color:
+            children = self.get_training_children()
+            if not children:
+                self.finish_training_mode(success=True)
+                return
+            node = self.select_training_response(children)
+            move = node.move
+            if move not in self.board.legal_moves:
                 self.finish_training_mode(success=False, reason="séquence non disponible depuis cette position")
                 return
             if self.increment > 0:
@@ -920,26 +1081,29 @@ class ChessGUI:
                     self.time_white += self.increment
                 else:
                     self.time_black += self.increment
-            self.board.push(expected)
-            self.last_move = expected
-            self.training_index += 1
-        self.update_training_progress()
+            self.board.push(move)
+            self.last_move = move
+            if not self.advance_training_state(move):
+                self.finish_training_mode(success=False, reason="séquence interrompue (déviation)")
+                return
         self.update_board_display()
         self.update_clock_labels()
-        if self.training_active and (self.board.is_game_over() or self.training_index >= len(self.training_line)):
+        if self.training_active and (self.board.is_game_over() or not self.get_training_children()):
             self.finish_training_mode(success=True)
 
     def finish_training_mode(self, success=True, reason=None):
+        total_moves = self.training_moves_played
+        total_text = f" ({total_moves} coups)" if total_moves else ""
         if not self.training_active and not success:
             self.training_status_var.set("Séquence interrompue")
             return
         if not self.training_active and success:
-            self.training_status_var.set(f"Ligne terminée ({len(self.training_line)} coups) ✅")
+            self.training_status_var.set(f"Ligne terminée{total_text} ✅")
             return
         self.training_active = False
-        total = len(self.training_line)
+        self.training_possible_nodes = []
         if success:
-            self.training_status_var.set(f"Ligne terminée ({total} coups) ✅")
+            self.training_status_var.set(f"Ligne terminée{total_text} ✅")
             message = f"🎉 Ligne d'ouverture terminée ({self.training_opening_var.get()})."
             self.add_analysis(message)
             try:
@@ -953,7 +1117,7 @@ class ChessGUI:
             info = "⚠️ Séquence interrompue."
             if reason:
                 info = f"⚠️ Séquence interrompue: {reason}."
-            self.training_status_var.set("Séquence interrompue")
+            self.training_status_var.set(info)
             self.add_analysis(info)
             try:
                 messagebox.showwarning("Entraînement ouverture", info)
@@ -1179,19 +1343,23 @@ class ChessGUI:
     def make_move(self, move):
         training_player_move = False
         if self.training_active and self.board.turn == self.player_color:
-            expected = self.training_line[self.training_index] if self.training_index < len(self.training_line) else None
-            if expected is None:
+            children = self.get_training_children()
+            if not children:
                 self.finish_training_mode(success=True)
                 if (self.stockfish_ready and not self.board.is_game_over() and not self.auto_mode
                         and self.board.turn != self.player_color):
                     self.master.after(120, self.stockfish_move_once_for_manual)
                 return
-            if move != expected:
+            if move.uci() not in children:
                 try:
-                    expected_san = self.board.san(expected)
+                    expected_moves = sorted({self.board.san(child.move) for child in children.values()})
                 except Exception:
-                    expected_san = expected.uci()
-                messagebox.showwarning("Entraînement", f"Ce coup n'est pas dans la séquence choisie. Coup attendu : {expected_san}.")
+                    expected_moves = sorted({child.move.uci() for child in children.values()})
+                expected_text = ", ".join(expected_moves)
+                messagebox.showwarning(
+                    "Entraînement",
+                    f"Ce coup n'est pas dans les variantes sélectionnées. Coups possibles : {expected_text}.",
+                )
                 self.update_training_progress()
                 return
             training_player_move = True
@@ -1205,8 +1373,9 @@ class ChessGUI:
         self.move_stack_for_redo.clear()
         self.hint_move = None
         if training_player_move:
-            self.training_index += 1
-            self.update_training_progress()
+            if not self.advance_training_state(move):
+                self.finish_training_mode(success=False, reason="séquence interrompue (déviation)")
+                return
         self.update_board_display()
 
         if self.training_active:
