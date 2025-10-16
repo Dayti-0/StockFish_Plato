@@ -4,8 +4,10 @@ import json
 import os
 import queue
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime
 from io import BytesIO
+from typing import Dict, List, Optional, Sequence, Set
 
 import chess
 import chess.pgn
@@ -17,6 +19,27 @@ import cairosvg
 
 from .engine import SafeStockfish
 from .utils import MINIMAL_OPENINGS, clamp, load_training_openings
+
+
+@dataclass
+class TrainingTreeNode:
+    """Node used to represent the expected training moves tree."""
+
+    move: Optional[chess.Move] = None
+    san: Optional[str] = None
+    children: Dict[str, "TrainingTreeNode"] = field(default_factory=dict)
+    variations: Set[str] = field(default_factory=set)
+
+    def child_for(self, move: chess.Move, san: str) -> "TrainingTreeNode":
+        """Return (and create if necessary) the child node for ``move``."""
+
+        uci = move.uci()
+        if uci not in self.children:
+            self.children[uci] = TrainingTreeNode(move=move, san=san)
+        return self.children[uci]
+
+
+ALL_VARIATIONS_LABEL = "Toutes les variantes"
 
 class ChessGUI:
     BOARD_SIZE = 640
@@ -81,6 +104,7 @@ class ChessGUI:
         # Entraînement ouvertures
         self.training_mode_var = tk.BooleanVar(value=False)
         self.training_opening_var = tk.StringVar(value="Libre")
+        self.training_variation_var = tk.StringVar(value=ALL_VARIATIONS_LABEL)
         self.training_description_var = tk.StringVar(value="Mode libre sans séquence imposée.")
         self.training_status_var = tk.StringVar(value="Mode libre")
         self.training_lines = self.load_default_openings()
@@ -89,8 +113,14 @@ class ChessGUI:
             self.training_opening_var.set(first_opening)
             description = self.training_lines[first_opening].get("description", "")
             self.training_description_var.set(description)
-        self.training_line = []
-        self.training_index = 0
+        self.training_tree_root: Optional[TrainingTreeNode] = None
+        self.training_node: Optional[TrainingTreeNode] = None
+        self.training_moves_played = 0
+        self.training_current_variations: Set[str] = set()
+        self.training_total_moves_by_variation: Dict[str, int] = {}
+        self.training_available_variations: List[str] = []
+        self.training_followed_variation: Optional[str] = None
+        self.training_selected_variation: Optional[str] = None
         self.training_active = False
 
         # UI
@@ -474,6 +504,23 @@ class ChessGUI:
             self.training_combo.current(0)
         self.training_combo.bind("<<ComboboxSelected>>", lambda _e: self.on_training_choice())
 
+        variation_row = tk.Frame(training_frame, bg=self.colors['panel'])
+        self.register_widget(variation_row, 'panel')
+        variation_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        variation_label = tk.Label(variation_row,
+                                   text="Variante :",
+                                   fg=self.colors['fg'],
+                                   bg=self.colors['panel'])
+        self.register_widget(variation_label, 'panel', include_fg=True)
+        variation_label.pack(side=tk.LEFT)
+
+        self.training_variation_combo = ttk.Combobox(variation_row,
+                                                     state="readonly",
+                                                     textvariable=self.training_variation_var)
+        self.training_variation_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+        self.training_variation_combo.bind("<<ComboboxSelected>>", lambda _e: self.on_training_variation_choice())
+
         self.training_desc_label = tk.Label(training_frame,
                                             textvariable=self.training_description_var,
                                             wraplength=280,
@@ -827,58 +874,251 @@ class ChessGUI:
         data = self.training_lines.get(name, {})
         description = data.get("description", "Mode libre sans séquence imposée.")
         self.training_description_var.set(description)
-        if (not self.training_mode_var.get()) or not data.get("moves"):
+        variations = data.get("variations") or []
+        normalized_names = [
+            str(variation.get("name") or f"Variante {idx + 1}")
+            for idx, variation in enumerate(variations)
+        ]
+        self.training_available_variations = normalized_names
+
+        combo_values: List[str]
+        if variations:
+            combo_values = [ALL_VARIATIONS_LABEL] + normalized_names
+        else:
+            combo_values = [ALL_VARIATIONS_LABEL]
+
+        if hasattr(self, "training_variation_combo"):
+            self.training_variation_combo.configure(values=combo_values)
+            if variations:
+                self.training_variation_combo.configure(state="readonly")
+            else:
+                self.training_variation_combo.configure(state="disabled")
+            if self.training_variation_var.get() not in combo_values:
+                self.training_variation_var.set(combo_values[0])
+
+        if (not self.training_mode_var.get()) or not variations:
             self.training_status_var.set("Mode libre")
             return
+
         recommended = data.get("recommended_color")
-        if recommended:
-            self.training_status_var.set(f"Séquence prête (couleur conseillée : {recommended}).")
+        selection = self.training_variation_var.get()
+        if selection == ALL_VARIATIONS_LABEL or selection not in normalized_names:
+            if len(normalized_names) == 1:
+                selection_text = f"Variante : {normalized_names[0]}"
+            else:
+                selection_text = f"{len(normalized_names)} variantes disponibles"
         else:
-            self.training_status_var.set("Séquence prête.")
+            selection_text = f"Variante : {selection}"
+        if recommended:
+            self.training_status_var.set(
+                f"Séquence prête ({selection_text}, couleur conseillée : {recommended})."
+            )
+        else:
+            self.training_status_var.set(f"Séquence prête ({selection_text}).")
+
+    def on_training_variation_choice(self):
+        if not hasattr(self, "training_variation_combo"):
+            return
+        self.on_training_choice()
 
     def reset_training_state(self):
-        self.training_line = []
-        self.training_index = 0
+        self.training_tree_root = None
+        self.training_node = None
+        self.training_moves_played = 0
+        self.training_current_variations = set()
+        self.training_total_moves_by_variation = {}
+        self.training_followed_variation = None
+        self.training_selected_variation = None
         self.training_active = False
+        if hasattr(self, "training_variation_combo"):
+            if self.training_available_variations:
+                self.training_variation_combo.configure(state="readonly")
+            else:
+                self.training_variation_combo.configure(state="disabled")
 
-    def initialize_training_line(self, name):
+    def _build_training_tree(
+        self, variations: Sequence[tuple[str, Sequence[str]]]
+    ) -> TrainingTreeNode:
+        root = TrainingTreeNode()
+        for var_name, moves in variations:
+            preview_board = chess.Board()
+            current = root
+            current.variations.add(var_name)
+            try:
+                for san in moves:
+                    current.variations.add(var_name)
+                    move = preview_board.parse_san(san)
+                    canonical = preview_board.san(move)
+                    child = current.child_for(move, canonical)
+                    child.variations.add(var_name)
+                    preview_board.push(move)
+                    current = child
+                current.variations.add(var_name)
+            except ValueError as exc:
+                raise ValueError(f"{var_name}: {exc}") from exc
+        return root
+
+    def initialize_training_line(self, name, variation_name=None):
         self.reset_training_state()
         data = self.training_lines.get(name, {})
-        moves_san = data.get("moves", [])
-        if not moves_san:
+        variations_data = data.get("variations") or []
+        if not variations_data:
             self.training_status_var.set("Mode libre")
             return False
-        preview_board = chess.Board()
-        parsed_moves = []
+
+        normalized: List[tuple[str, List[str]]] = []
+        for idx, variation in enumerate(variations_data):
+            if variation is None:
+                continue
+            var_name = str(variation.get("name") or f"Variante {idx + 1}")
+            moves = [str(move) for move in variation.get("moves", [])]
+            normalized.append((var_name, moves))
+
+        selected_pairs: List[tuple[str, List[str]]]
+        if variation_name and variation_name != ALL_VARIATIONS_LABEL:
+            selected_pairs = [pair for pair in normalized if pair[0] == variation_name]
+            if not selected_pairs:
+                selected_pairs = [normalized[0]]
+        else:
+            selected_pairs = normalized
+
         try:
-            for san in moves_san:
-                move = preview_board.parse_san(san)
-                parsed_moves.append(move)
-                preview_board.push(move)
+            root = self._build_training_tree(selected_pairs)
         except ValueError as exc:
             self.training_status_var.set("Séquence invalide")
             self.add_analysis(f"❌ Séquence invalide ({name}): {exc}")
             messagebox.showerror("Entraînement ouverture", f"Séquence invalide pour {name}: {exc}")
             return False
-        self.training_line = parsed_moves
-        self.training_index = 0
+
+        self.training_tree_root = root
+        self.training_node = root
         self.training_active = True
+        self.training_moves_played = 0
+        self.training_total_moves_by_variation = {
+            var_name: len(moves) for var_name, moves in selected_pairs
+        }
+        self.training_current_variations = {var_name for var_name, _ in selected_pairs}
+        self.training_selected_variation = (
+            variation_name if variation_name and variation_name != ALL_VARIATIONS_LABEL else None
+        )
+        self.training_followed_variation = self.training_selected_variation
+        if hasattr(self, "training_variation_combo"):
+            self.training_variation_combo.configure(state="disabled")
         self.update_training_progress()
         return True
+
+    def _get_expected_children(self) -> List[TrainingTreeNode]:
+        if not self.training_node:
+            return []
+        valid_variations = self.training_current_variations or set(
+            self.training_total_moves_by_variation.keys()
+        )
+        children = []
+        for child in self.training_node.children.values():
+            if not valid_variations or child.variations & valid_variations:
+                children.append(child)
+        return children
+
+    def _advance_training_state(self, child: TrainingTreeNode) -> None:
+        self.training_node = child
+        self.training_moves_played += 1
+        if self.training_current_variations:
+            self.training_current_variations &= child.variations
+        else:
+            self.training_current_variations = set(child.variations)
+        if len(self.training_current_variations) == 1:
+            self.training_followed_variation = next(iter(self.training_current_variations))
+
+    def _select_auto_child(self, candidates: Sequence[TrainingTreeNode]) -> TrainingTreeNode:
+        priority_variations: List[str] = []
+        if self.training_followed_variation:
+            priority_variations.append(self.training_followed_variation)
+        if self.training_selected_variation and (
+            self.training_selected_variation not in priority_variations
+        ):
+            priority_variations.append(self.training_selected_variation)
+
+        for variation in priority_variations:
+            for child in candidates:
+                if variation in child.variations:
+                    return child
+
+        if self.training_current_variations:
+            for child in candidates:
+                if child.variations >= self.training_current_variations:
+                    return child
+            for child in candidates:
+                if child.variations & self.training_current_variations:
+                    return child
+
+        return sorted(candidates, key=lambda node: node.san or "")[0]
 
     def update_training_progress(self):
         if not self.training_active:
             return
-        total = len(self.training_line)
-        done = min(self.training_index, total)
-        self.training_status_var.set(f"Progression: {done}/{total} coups")
+
+        done = self.training_moves_played
+        plural_done = "s" if done > 1 else ""
+
+        current_variations = (
+            self.training_current_variations
+            if self.training_current_variations
+            else set(self.training_total_moves_by_variation.keys())
+        )
+
+        remaining_counts = [
+            max(self.training_total_moves_by_variation.get(var, done) - done, 0)
+            for var in current_variations
+        ]
+        if remaining_counts:
+            min_remaining = min(remaining_counts)
+            max_remaining = max(remaining_counts)
+        else:
+            min_remaining = max_remaining = 0
+
+        if min_remaining == max_remaining:
+            remaining = min_remaining
+            if remaining == 0:
+                remaining_text = "Aucun coup restant"
+            else:
+                remaining_text = f"{remaining} coup{'s' if remaining > 1 else ''} restant"
+        else:
+            remaining_text = f"{min_remaining} à {max_remaining} coups restants"
+
+        if self.training_followed_variation:
+            variation_text = f"Variante suivie : {self.training_followed_variation}"
+        elif self.training_selected_variation:
+            variation_text = f"Variante sélectionnée : {self.training_selected_variation}"
+        elif len(current_variations) == 1:
+            variation_text = f"Variante suivie : {next(iter(current_variations))}"
+        elif current_variations:
+            sorted_names = sorted(current_variations)
+            if len(sorted_names) > 3:
+                variation_text = (
+                    "Variantes possibles : "
+                    + ", ".join(sorted_names[:3])
+                    + "…"
+                )
+            else:
+                variation_text = "Variantes possibles : " + ", ".join(sorted_names)
+        else:
+            variation_text = "Variantes en suivi : N/A"
+
+        self.training_status_var.set(
+            f"Progression : {done} coup{plural_done} joués – {remaining_text} – {variation_text}"
+        )
 
     def play_training_moves_until_player_turn(self):
         if not self.training_active:
             return
-        while self.training_active and self.training_index < len(self.training_line) and self.board.turn != self.player_color:
-            expected = self.training_line[self.training_index]
-            if expected not in self.board.legal_moves:
+
+        while self.training_active and self.board.turn != self.player_color:
+            candidates = self._get_expected_children()
+            if not candidates:
+                self.finish_training_mode(success=False, reason="séquence non disponible depuis cette position")
+                return
+            chosen = self._select_auto_child(candidates)
+            if not chosen.move or chosen.move not in self.board.legal_moves:
                 self.finish_training_mode(success=False, reason="séquence non disponible depuis cette position")
                 return
             if self.increment > 0:
@@ -886,45 +1126,76 @@ class ChessGUI:
                     self.time_white += self.increment
                 else:
                     self.time_black += self.increment
-            self.board.push(expected)
-            self.last_move = expected
-            self.training_index += 1
+            self.board.push(chosen.move)
+            self.last_move = chosen.move
+            self.move_stack_for_redo.clear()
+            self._advance_training_state(chosen)
+
         self.update_training_progress()
         self.update_board_display()
         self.update_clock_labels()
-        if self.training_active and (self.board.is_game_over() or self.training_index >= len(self.training_line)):
+
+        if self.training_active and (
+            self.board.is_game_over() or not self._get_expected_children()
+        ):
             self.finish_training_mode(success=True)
 
     def finish_training_mode(self, success=True, reason=None):
         if not self.training_active and not success:
             self.training_status_var.set("Séquence interrompue")
             return
+
         if not self.training_active and success:
-            self.training_status_var.set(f"Ligne terminée ({len(self.training_line)} coups) ✅")
             return
+
         self.training_active = False
-        total = len(self.training_line)
+
+        done = self.training_moves_played
+        variation_name = (
+            self.training_followed_variation
+            or self.training_selected_variation
+            or (next(iter(self.training_current_variations)) if self.training_current_variations else None)
+        )
+
         if success:
-            self.training_status_var.set(f"Ligne terminée ({total} coups) ✅")
-            message = f"🎉 Ligne d'ouverture terminée ({self.training_opening_var.get()})."
+            status = f"Ligne terminée ({done} coup{'s' if done > 1 else ''}) ✅"
+            if variation_name:
+                status += f" – {variation_name}"
+            self.training_status_var.set(status)
+            message = (
+                "🎉 Ligne d'ouverture terminée"
+                f" ({self.training_opening_var.get()})"
+            )
+            if variation_name:
+                message += f" – {variation_name}"
             self.add_analysis(message)
             try:
                 messagebox.showinfo("Entraînement ouverture", message)
             except Exception:
                 pass
-            if (self.stockfish_ready and not self.board.is_game_over() and not self.auto_mode
-                    and self.board.turn != self.player_color):
+            if (
+                self.stockfish_ready
+                and not self.board.is_game_over()
+                and not self.auto_mode
+                and self.board.turn != self.player_color
+            ):
                 self.master.after(600, self.stockfish_move_once_for_manual)
         else:
             info = "⚠️ Séquence interrompue."
             if reason:
                 info = f"⚠️ Séquence interrompue: {reason}."
-            self.training_status_var.set("Séquence interrompue")
+            self.training_status_var.set(info)
             self.add_analysis(info)
             try:
                 messagebox.showwarning("Entraînement ouverture", info)
             except Exception:
                 pass
+
+        if hasattr(self, "training_variation_combo"):
+            if self.training_available_variations:
+                self.training_variation_combo.configure(state="readonly")
+            else:
+                self.training_variation_combo.configure(state="disabled")
 
     # ---------- Coordonnées & mapping ----------
     def get_board_padding(self):
@@ -1144,20 +1415,24 @@ class ChessGUI:
     # ---------- Jeu (manuel) ----------
     def make_move(self, move):
         training_player_move = False
+        training_child: Optional[TrainingTreeNode] = None
         if self.training_active and self.board.turn == self.player_color:
-            expected = self.training_line[self.training_index] if self.training_index < len(self.training_line) else None
-            if expected is None:
-                self.finish_training_mode(success=True)
-                if (self.stockfish_ready and not self.board.is_game_over() and not self.auto_mode
-                        and self.board.turn != self.player_color):
-                    self.master.after(120, self.stockfish_move_once_for_manual)
+            candidates = self._get_expected_children()
+            if not candidates:
+                self.finish_training_mode(success=False, reason="séquence non disponible depuis cette position")
                 return
-            if move != expected:
-                try:
-                    expected_san = self.board.san(expected)
-                except Exception:
-                    expected_san = expected.uci()
-                messagebox.showwarning("Entraînement", f"Ce coup n'est pas dans la séquence choisie. Coup attendu : {expected_san}.")
+            for child in candidates:
+                if child.move == move or (child.move and child.move.uci() == move.uci()):
+                    training_child = child
+                    break
+            if training_child is None:
+                expected_san = ", ".join(
+                    child.san or (child.move.uci() if child.move else "?") for child in candidates
+                )
+                messagebox.showwarning(
+                    "Entraînement",
+                    f"Ce coup n'est pas dans la séquence choisie. Coups attendus : {expected_san}.",
+                )
                 self.update_training_progress()
                 return
             training_player_move = True
@@ -1171,7 +1446,8 @@ class ChessGUI:
         self.move_stack_for_redo.clear()
         self.hint_move = None
         if training_player_move:
-            self.training_index += 1
+            if training_child:
+                self._advance_training_state(training_child)
             self.update_training_progress()
         self.update_board_display()
 
@@ -1590,7 +1866,8 @@ Nuls: {s['draws']}"""
     def start_new_game(self):
         selected_opening = self.training_opening_var.get()
         opening_data = self.training_lines.get(selected_opening, {})
-        training_requested = self.training_mode_var.get() and bool(opening_data.get("moves"))
+        variations_available = bool(opening_data.get("variations"))
+        training_requested = self.training_mode_var.get() and variations_available
         if not self.stockfish_ready and not training_requested:
             messagebox.showerror("Erreur", "Stockfish n'est pas disponible !")
             return
@@ -1615,8 +1892,9 @@ Nuls: {s['draws']}"""
         self.reset_training_state()
 
         training_active = False
+        selected_variation = self.training_variation_var.get()
         if training_requested:
-            if self.initialize_training_line(selected_opening):
+            if self.initialize_training_line(selected_opening, selected_variation):
                 training_active = True
                 desc = opening_data.get("description", "")
                 recap = f"📘 Séquence: {selected_opening}"
@@ -1625,6 +1903,12 @@ Nuls: {s['draws']}"""
                 recommended = opening_data.get("recommended_color")
                 if recommended:
                     recap += f"\n🎯 Couleur conseillée: {recommended}"
+                if selected_variation and selected_variation != ALL_VARIATIONS_LABEL:
+                    recap += f"\n🔀 Variante sélectionnée: {selected_variation}"
+                elif variations_available:
+                    count_variations = len(opening_data.get("variations", []))
+                    if count_variations > 1:
+                        recap += f"\n🔀 Variantes disponibles: {count_variations}"
                 self.add_analysis(recap)
             else:
                 training_active = False
