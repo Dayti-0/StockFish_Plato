@@ -85,6 +85,16 @@ class ChessGUI:
         self.auto_black_elo = 1500
         self.auto_job = None
 
+        # Entraînement ouvertures
+        self.training_mode_var = tk.BooleanVar(value=False)
+        self.training_opening_var = tk.StringVar(value="Libre")
+        self.training_description_var = tk.StringVar(value="Mode libre sans séquence imposée.")
+        self.training_status_var = tk.StringVar(value="Mode libre")
+        self.training_lines = self.load_default_openings()
+        self.training_line = []
+        self.training_index = 0
+        self.training_active = False
+
         # UI
         self.setup_ui()
         self.update_board_display()
@@ -447,6 +457,66 @@ class ChessGUI:
         self.register_widget(difficulty_scale, 'panel', include_fg=True)
         difficulty_scale.pack(fill=tk.X, padx=8, pady=(4, 8))
 
+        training_frame = tk.LabelFrame(player_frame,
+                                       text="Mode ouverture",
+                                       fg=self.colors['fg'],
+                                       bg=self.colors['panel'],
+                                       font=("Arial", 11, "bold"))
+        self.register_widget(training_frame, 'panel', include_fg=True)
+        training_frame.pack(fill=tk.X, padx=12, pady=(0, 8))
+
+        training_toggle = tk.Checkbutton(training_frame,
+                                         text="Activer l'entraînement d'ouverture",
+                                         variable=self.training_mode_var,
+                                         command=self.on_training_toggle,
+                                         fg=self.colors['fg'],
+                                         bg=self.colors['panel'],
+                                         selectcolor=self.colors['panel'])
+        self.register_widget(training_toggle, 'panel', include_fg=True)
+        training_toggle.pack(anchor='w', padx=8, pady=(6, 4))
+
+        combo_row = tk.Frame(training_frame, bg=self.colors['panel'])
+        self.register_widget(combo_row, 'panel')
+        combo_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        combo_label = tk.Label(combo_row,
+                               text="Séquence :",
+                               fg=self.colors['fg'],
+                               bg=self.colors['panel'])
+        self.register_widget(combo_label, 'panel', include_fg=True)
+        combo_label.pack(side=tk.LEFT)
+
+        self.training_combo = ttk.Combobox(combo_row,
+                                           state="readonly",
+                                           values=list(self.training_lines.keys()),
+                                           textvariable=self.training_opening_var)
+        self.training_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+        try:
+            self.training_combo.current(list(self.training_lines.keys()).index(self.training_opening_var.get()))
+        except ValueError:
+            self.training_combo.current(0)
+        self.training_combo.bind("<<ComboboxSelected>>", lambda _e: self.on_training_choice())
+
+        self.training_desc_label = tk.Label(training_frame,
+                                            textvariable=self.training_description_var,
+                                            wraplength=280,
+                                            justify=tk.LEFT,
+                                            fg=self.colors['fg'],
+                                            bg=self.colors['panel'],
+                                            font=("Arial", 9))
+        self.register_widget(self.training_desc_label, 'panel', include_fg=True)
+        self.training_desc_label.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        self.training_status_label = tk.Label(training_frame,
+                                              textvariable=self.training_status_var,
+                                              fg=self.colors['accent'],
+                                              bg=self.colors['panel'],
+                                              font=("Arial", 10, "italic"))
+        self.register_widget(self.training_status_label, 'panel', include_fg=True)
+        self.training_status_label.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        self.on_training_choice()
+
         clock_frame = tk.LabelFrame(self.game_tab,
                                     text="Horloge",
                                     fg=self.colors['fg'],
@@ -765,6 +835,166 @@ class ChessGUI:
         self.master.bind("<Key-o>", lambda e: self.toggle_overlay_mode())
         self.master.bind("<Key-O>", lambda e: self.toggle_overlay_mode())
         self.master.bind("<Escape>", self.on_escape)
+
+
+    # ---------- Entraînement d'ouvertures ----------
+
+    def load_default_openings(self):
+        return {
+            "Libre": {
+                "moves": [],
+                "description": "Mode libre sans séquence imposée.",
+                "recommended_color": None,
+            },
+            "Défense Caro-Kann (Classique)": {
+                "moves": [
+                    "e4", "c6", "d4", "d5", "Nc3", "dxe4", "Nxe4", "Bf5",
+                    "Ng3", "Bg6", "h4", "h6",
+                ],
+                "description": "1.e4 c6 2.d4 d5 3.Nc3 dxe4 4.Nxe4 Bf5 5.Ng3 Bg6 6.h4 h6",
+                "recommended_color": "noirs",
+            },
+            "Défense Sicilienne (Najdorf)": {
+                "moves": [
+                    "e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6",
+                ],
+                "description": "1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 a6",
+                "recommended_color": "noirs",
+            },
+            "Défense Française (Classique)": {
+                "moves": [
+                    "e4", "e6", "d4", "d5", "Nc3", "Nf6", "Bg5", "Be7",
+                ],
+                "description": "1.e4 e6 2.d4 d5 3.Nc3 Nf6 4.Bg5 Be7",
+                "recommended_color": "noirs",
+            },
+            "Ouverture Espagnole (Défense Morphy)": {
+                "moves": [
+                    "e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O", "Be7",
+                ],
+                "description": "1.e4 e5 2.Nf3 Nc6 3.Bb5 a6 4.Ba4 Nf6 5.O-O Be7",
+                "recommended_color": "noirs",
+            },
+            "Gambit Dame refusé": {
+                "moves": [
+                    "d4", "d5", "c4", "e6", "Nc3", "Nf6", "Bg5", "Be7",
+                ],
+                "description": "1.d4 d5 2.c4 e6 3.Nc3 Nf6 4.Bg5 Be7",
+                "recommended_color": "noirs",
+            },
+        }
+
+    def on_training_toggle(self):
+        if not self.training_mode_var.get():
+            self.training_status_var.set("Mode libre")
+            self.reset_training_state()
+        else:
+            self.on_training_choice()
+
+    def on_training_choice(self):
+        name = self.training_opening_var.get()
+        data = self.training_lines.get(name, {})
+        description = data.get("description", "Mode libre sans séquence imposée.")
+        self.training_description_var.set(description)
+        if (not self.training_mode_var.get()) or not data.get("moves"):
+            self.training_status_var.set("Mode libre")
+            return
+        recommended = data.get("recommended_color")
+        if recommended:
+            self.training_status_var.set(f"Séquence prête (couleur conseillée : {recommended}).")
+        else:
+            self.training_status_var.set("Séquence prête.")
+
+    def reset_training_state(self):
+        self.training_line = []
+        self.training_index = 0
+        self.training_active = False
+
+    def initialize_training_line(self, name):
+        self.reset_training_state()
+        data = self.training_lines.get(name, {})
+        moves_san = data.get("moves", [])
+        if not moves_san:
+            self.training_status_var.set("Mode libre")
+            return False
+        preview_board = chess.Board()
+        parsed_moves = []
+        try:
+            for san in moves_san:
+                move = preview_board.parse_san(san)
+                parsed_moves.append(move)
+                preview_board.push(move)
+        except ValueError as exc:
+            self.training_status_var.set("Séquence invalide")
+            self.add_analysis(f"❌ Séquence invalide ({name}): {exc}")
+            messagebox.showerror("Entraînement ouverture", f"Séquence invalide pour {name}: {exc}")
+            return False
+        self.training_line = parsed_moves
+        self.training_index = 0
+        self.training_active = True
+        self.update_training_progress()
+        return True
+
+    def update_training_progress(self):
+        if not self.training_active:
+            return
+        total = len(self.training_line)
+        done = min(self.training_index, total)
+        self.training_status_var.set(f"Progression: {done}/{total} coups")
+
+    def play_training_moves_until_player_turn(self):
+        if not self.training_active:
+            return
+        while self.training_active and self.training_index < len(self.training_line) and self.board.turn != self.player_color:
+            expected = self.training_line[self.training_index]
+            if expected not in self.board.legal_moves:
+                self.finish_training_mode(success=False, reason="séquence non disponible depuis cette position")
+                return
+            if not self.overlay_mode and self.increment > 0:
+                if self.board.turn == chess.WHITE:
+                    self.time_white += self.increment
+                else:
+                    self.time_black += self.increment
+            self.board.push(expected)
+            self.last_move = expected
+            self.training_index += 1
+        self.update_training_progress()
+        self.update_board_display()
+        self.update_clock_labels()
+        if self.training_active and (self.board.is_game_over() or self.training_index >= len(self.training_line)):
+            self.finish_training_mode(success=True)
+
+    def finish_training_mode(self, success=True, reason=None):
+        if not self.training_active and not success:
+            self.training_status_var.set("Séquence interrompue")
+            return
+        if not self.training_active and success:
+            self.training_status_var.set(f"Ligne terminée ({len(self.training_line)} coups) ✅")
+            return
+        self.training_active = False
+        total = len(self.training_line)
+        if success:
+            self.training_status_var.set(f"Ligne terminée ({total} coups) ✅")
+            message = f"🎉 Ligne d'ouverture terminée ({self.training_opening_var.get()})."
+            self.add_analysis(message)
+            try:
+                messagebox.showinfo("Entraînement ouverture", message)
+            except Exception:
+                pass
+            if (self.stockfish_ready and not self.board.is_game_over() and not self.auto_mode
+                    and not self.overlay_mode and self.board.turn != self.player_color):
+                self.master.after(600, self.stockfish_move_once_for_manual)
+        else:
+            info = "⚠️ Séquence interrompue."
+            if reason:
+                info = f"⚠️ Séquence interrompue: {reason}."
+            self.training_status_var.set("Séquence interrompue")
+            self.add_analysis(info)
+            try:
+                messagebox.showwarning("Entraînement ouverture", info)
+            except Exception:
+                pass
+
     # ---------- Coordonnées & mapping ----------
     def get_board_padding(self):
         return 0 if self.overlay_mode else self.PADDING
@@ -1011,6 +1241,25 @@ class ChessGUI:
 
     # ---------- Jeu (manuel) ----------
     def make_move(self, move):
+        training_player_move = False
+        if self.training_active and self.board.turn == self.player_color:
+            expected = self.training_line[self.training_index] if self.training_index < len(self.training_line) else None
+            if expected is None:
+                self.finish_training_mode(success=True)
+                if (self.stockfish_ready and not self.board.is_game_over() and not self.auto_mode
+                        and not self.overlay_mode and self.board.turn != self.player_color):
+                    self.master.after(120, self.stockfish_move_once_for_manual)
+                return
+            if move != expected:
+                try:
+                    expected_san = self.board.san(expected)
+                except Exception:
+                    expected_san = expected.uci()
+                messagebox.showwarning("Entraînement", f"Ce coup n'est pas dans la séquence choisie. Coup attendu : {expected_san}.")
+                self.update_training_progress()
+                return
+            training_player_move = True
+
         if not self.overlay_mode:
             if self.board.turn == chess.WHITE and self.increment > 0:
                 self.time_white += self.increment
@@ -1020,6 +1269,9 @@ class ChessGUI:
         self.last_move = move
         self.move_stack_for_redo.clear()
         self.hint_move = None
+        if training_player_move:
+            self.training_index += 1
+            self.update_training_progress()
         self.update_board_display()
 
         if self.overlay_mode:
@@ -1036,6 +1288,15 @@ class ChessGUI:
             else:
                 self.request_overlay_suggestion()
             self.update_clock_labels()
+            return
+
+        if self.training_active:
+            if self.board.is_game_over():
+                self.finish_training_mode(success=True)
+                return
+            self.play_training_moves_until_player_turn()
+            if self.training_active:
+                self.disable_inputs(False)
             return
 
         if self.board.is_game_over():
@@ -1644,7 +1905,10 @@ Nuls: {s['draws']}"""
         if self.overlay_mode:
             messagebox.showinfo("Mode overlay", "Désactivez le mode overlay pour lancer une partie classique.")
             return
-        if not self.stockfish_ready:
+        selected_opening = self.training_opening_var.get()
+        opening_data = self.training_lines.get(selected_opening, {})
+        training_requested = self.training_mode_var.get() and bool(opening_data.get("moves"))
+        if not self.stockfish_ready and not training_requested:
             messagebox.showerror("Erreur", "Stockfish n'est pas disponible !")
             return
         if self.auto_mode:
@@ -1665,6 +1929,26 @@ Nuls: {s['draws']}"""
         self.last_move = None
         self.move_stack_for_redo.clear()
         self.hint_move = None
+        self.reset_training_state()
+
+        training_active = False
+        if training_requested:
+            if self.initialize_training_line(selected_opening):
+                training_active = True
+                desc = opening_data.get("description", "")
+                recap = f"📘 Séquence: {selected_opening}"
+                if desc:
+                    recap += f"\n📝 {desc}"
+                recommended = opening_data.get("recommended_color")
+                if recommended:
+                    recap += f"\n🎯 Couleur conseillée: {recommended}"
+                self.add_analysis(recap)
+            else:
+                training_active = False
+                self.training_mode_var.set(False)
+                self.training_status_var.set("Mode libre")
+        else:
+            self.training_status_var.set("Mode libre")
 
         self.flip_board = (self.player_color == chess.BLACK)
         self.flip_var.set(self.flip_board)
@@ -1674,7 +1958,9 @@ Nuls: {s['draws']}"""
         self.disable_inputs(False)
         self.start_clock()
 
-        if self.player_color == chess.BLACK:
+        if training_active:
+            self.play_training_moves_until_player_turn()
+        elif self.player_color == chess.BLACK:
             self.master.after(500, self.stockfish_move_once_for_manual)
 
     def resign_game(self):
@@ -1683,6 +1969,7 @@ Nuls: {s['draws']}"""
                 self.game_active = False
                 self.stop_clock()
                 self.stop_auto_game()
+                self.training_active = False
                 self.stats["games"] += 1
                 self.stats["losses"] += 1
                 self.stats["current_streak"] = 0
@@ -1698,6 +1985,7 @@ Nuls: {s['draws']}"""
         self.game_active = False
         self.stop_clock()
         self.stop_auto_game()
+        self.training_active = False
         result = self.board.result()
         self.stats["games"] += 1
         if not was_auto:
