@@ -518,6 +518,17 @@ class ChessGUI:
         self.register_widget(clock_frame, 'panel', include_fg=True)
         clock_frame.pack(fill=tk.X, padx=12, pady=8)
 
+        self.start_game_tab_btn = tk.Button(self.game_tab,
+                                            text="🚀 Lancer la partie",
+                                            command=self.start_new_game,
+                                            bg='#4CAF50',
+                                            fg='white',
+                                            font=("Arial", 11, "bold"),
+                                            relief=tk.FLAT,
+                                            padx=10,
+                                            pady=10)
+        self.start_game_tab_btn.pack(fill=tk.X, padx=20, pady=(4, 16))
+
         self.clock_white_lbl = tk.Label(clock_frame,
                                         text="Blancs: 05:00",
                                         fg=self.colors['fg'],
@@ -1613,7 +1624,7 @@ Nuls: {s['draws']}"""
 
     def disable_inputs(self, disabled: bool):
         state = tk.DISABLED if disabled else tk.NORMAL
-        for b in (self.start_btn, self.hint_btn, self.clear_hint_btn, self.resign_btn):
+        for b in (self.start_btn, self.start_game_tab_btn, self.hint_btn, self.clear_hint_btn, self.resign_btn):
             try: b.config(state=state)
             except: pass
 
